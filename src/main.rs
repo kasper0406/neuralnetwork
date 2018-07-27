@@ -25,7 +25,7 @@ struct ImageSample {
 fn main() {
     let image_size = 16 * 16;
 
-    let mut file = File::open("/Users/kasper/ML/digits/semeion.data").expect("Data file not found!");
+    let mut file = File::open("/Users/kasper/ML/digits/digits/data/semeion.data").expect("Data file not found!");
     let mut content = String::new();
     file.read_to_string(&mut content).expect("Failed reading dataset file!");
     let samples: Vec<ImageSample> = content.trim().split("\n")
