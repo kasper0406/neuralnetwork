@@ -24,23 +24,31 @@ struct ImageSample {
 
 fn load_kasper_samples() -> Vec<ImageSample> {
     let mut result = vec![];
-    for i in 0..10 {
-        let filename = format!("./data/digits/{}_handwritten.raw", i);
-        let mut file = File::open(&filename).expect("File not found");
+    for category in &vec![("handwritten", 3), ("machine", 4)] {
+        for i in 0..10 {
+            let filename = format!("./data/digits/{}_{}.raw", i, category.0);
+            let mut file = File::open(&filename).expect("File not found");
 
-        let mut pixels = Vec::with_capacity(16 * 16);
-        let mut pixel_buffer = [0; 3];
-        while let Ok(read_bytes) = file.read(&mut pixel_buffer) {
-            if (read_bytes == 0) {
-                break;
+            let mut pixels = Vec::with_capacity(16 * 16);
+            let mut pixel_buffer = [0; 3];
+            while let Ok(read_bytes) = file.read(&mut pixel_buffer) {
+                if (read_bytes == 0) {
+                    break;
+                }
+                pixels.push(1_f64 - ((pixel_buffer[0] as f64 + pixel_buffer[1] as f64 + pixel_buffer[2] as f64) / (3 * 255) as f64));
+
+                // Monster hack to adjust for image format
+                if (category.1 == 4) {
+                    let mut tmp_buffer = [0; 1];
+                    file.read(&mut tmp_buffer);
+                }
             }
-            pixels.push(1_f64 - ((pixel_buffer[0] as f64 + pixel_buffer[1] as f64 + pixel_buffer[2] as f64) / (3 * 255) as f64));
-        }
 
-        result.push(ImageSample {
-            label: Matrix::new(10, 1, &|row, col| if i == row { 1_f64 } else { 0_f64 }),
-            values: Matrix::new(16 * 16, 1, &|row, col| pixels[row])
-        });
+            result.push(ImageSample {
+                label: Matrix::new(10, 1, &|row, col| if i == row { 1_f64 } else { 0_f64 }),
+                values: Matrix::new(16 * 16, 1, &|row, col| pixels[row])
+            });
+        }
     }
 
     return result;
@@ -118,7 +126,7 @@ fn main() {
     let training_samples = &samples[0..1000];
     let test_samples = &samples[1000..];
 
-    for round in 0..500 {
+    for round in 0..100 {
         println!("Avg error after {} rounds: {} in-sample, {} out-of-sample",
             round, compute_avg_error(&nn, training_samples), compute_avg_error(&nn, test_samples));
 
