@@ -1,0 +1,8 @@
+[package]
+name = "digits"
+version = "0.1.0"
+authors = ["Kasper Nielsen <kasper0406@gmail.com>"]
+
+[dependencies]
+num = "*"
+rand = "*"
