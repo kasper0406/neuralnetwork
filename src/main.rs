@@ -52,7 +52,7 @@ fn main() {
     let mut file = File::open("./data/semeion.data").expect("Data file not found!");
     let mut content = String::new();
     file.read_to_string(&mut content).expect("Failed reading dataset file!");
-    let samples: Vec<ImageSample> = content.trim().split("\n")
+    let mut samples: Vec<ImageSample> = content.trim().split("\n")
         .map(|sample| {
             let raw_values: Vec<f64> = sample.trim().split(" ").map(|value| {
                 return value.parse().unwrap();
@@ -114,6 +114,7 @@ fn main() {
         return total_error / samples.len() as f64;
     };
 
+    thread_rng().shuffle(&mut samples);
     let training_samples = &samples[0..1000];
     let test_samples = &samples[1000..];
 
