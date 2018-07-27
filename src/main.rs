@@ -86,6 +86,11 @@ fn main() {
 
     let sigmoid = &Sigmoid;
     let layers = vec![
+        /*
+        LayerDescription {
+            num_neurons: 50_usize,
+            function: sigmoid
+        }, */
         LayerDescription {
             num_neurons: 50_usize,
             function: sigmoid
@@ -102,23 +107,28 @@ fn main() {
 
     let mut nn = NeuralNetwork::new(image_size, layers.clone());
 
-    let compute_avg_error = |network: &NeuralNetwork| {
+    let compute_avg_error = |network: &NeuralNetwork, samples: &[ImageSample]| {
         let total_error = samples.iter().fold(0_f64, |acc, sample| {
             return acc + network.error(&sample.values, &sample.label);
         });
         return total_error / samples.len() as f64;
     };
 
+    let training_samples = &samples[0..1000];
+    let test_samples = &samples[1000..];
+
     for round in 0..500 {
-        println!("Avg error after {} rounds: {}", round, compute_avg_error(&nn));
+        println!("Avg error after {} rounds: {} in-sample, {} out-of-sample",
+            round, compute_avg_error(&nn, training_samples), compute_avg_error(&nn, test_samples));
 
         for _ in 0..1000 {
-            let sample = rand::thread_rng().choose(&samples).unwrap();
+            let sample = rand::thread_rng().choose(&training_samples).unwrap();
             nn.train(&sample.values, &sample.label);
         }
     }
 
-    println!("Avg error after = {}", compute_avg_error(&nn));
+    println!("Avg error after training: {} in-sample, {} out-of-sample",
+            compute_avg_error(&nn, training_samples), compute_avg_error(&nn, test_samples));
 
     for kasper_sample in &load_kasper_samples() {
         let prediction = nn.predict(&kasper_sample.values);
