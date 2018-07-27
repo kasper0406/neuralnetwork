@@ -4,7 +4,7 @@ extern crate rand;
 mod matrix;
 use matrix::Matrix;
 use rand::distributions::{Normal, Distribution};
-use rand::Rng;
+use rand::{thread_rng, Rng};
 
 mod activationfunction;
 use activationfunction::Sigmoid;
@@ -22,10 +22,34 @@ struct ImageSample {
     label: Matrix<f64>
 }
 
+fn load_kasper_samples() -> Vec<ImageSample> {
+    let mut result = vec![];
+    for i in 0..10 {
+        let filename = format!("./data/digits/{}_handwritten.raw", i);
+        let mut file = File::open(&filename).expect("File not found");
+
+        let mut pixels = Vec::with_capacity(16 * 16);
+        let mut pixel_buffer = [0; 3];
+        while let Ok(read_bytes) = file.read(&mut pixel_buffer) {
+            if (read_bytes == 0) {
+                break;
+            }
+            pixels.push(1_f64 - ((pixel_buffer[0] as f64 + pixel_buffer[1] as f64 + pixel_buffer[2] as f64) / (3 * 255) as f64));
+        }
+
+        result.push(ImageSample {
+            label: Matrix::new(10, 1, &|row, col| if i == row { 1_f64 } else { 0_f64 }),
+            values: Matrix::new(16 * 16, 1, &|row, col| pixels[row])
+        });
+    }
+
+    return result;
+}
+
 fn main() {
     let image_size = 16 * 16;
 
-    let mut file = File::open("/Users/kasper/ML/digits/digits/data/semeion.data").expect("Data file not found!");
+    let mut file = File::open("./data/semeion.data").expect("Data file not found!");
     let mut content = String::new();
     file.read_to_string(&mut content).expect("Failed reading dataset file!");
     let samples: Vec<ImageSample> = content.trim().split("\n")
@@ -43,10 +67,27 @@ fn main() {
 
     println!("#samples = {}", samples.len());
 
+    let print_sample = |sample: &Matrix<f64>| {
+        for i in 0..16 {
+            let mut values = Vec::with_capacity(16);
+            for j in 0..16 {
+                values.push(sample[(i * 16 + j, 0)].to_string());
+            }
+            println!("{}", values.join(""));
+        }
+    };
+
+    /*
+    for i in 0..100 {
+        print_sample(&samples[i].values);
+        println!("{}", &samples[i].label);
+        println!("");
+    } */
+
     let sigmoid = &Sigmoid;
     let layers = vec![
         LayerDescription {
-            num_neurons: 30_usize,
+            num_neurons: 50_usize,
             function: sigmoid
         },
         LayerDescription {
@@ -68,19 +109,21 @@ fn main() {
         return total_error / samples.len() as f64;
     };
 
-    for round in 0..100 {
+    for round in 0..500 {
         println!("Avg error after {} rounds: {}", round, compute_avg_error(&nn));
 
-        /*
-        for _ in 0..10 {
+        for _ in 0..1000 {
             let sample = rand::thread_rng().choose(&samples).unwrap();
-            nn.train(&sample.values, &sample.label);
-        } */
-
-        for sample in &samples {
             nn.train(&sample.values, &sample.label);
         }
     }
 
     println!("Avg error after = {}", compute_avg_error(&nn));
+
+    for kasper_sample in &load_kasper_samples() {
+        let prediction = nn.predict(&kasper_sample.values);
+        print_sample(&kasper_sample.values);
+        println!("Label:\n{}", kasper_sample.label.transpose());
+        println!("Prediction:\n{}", prediction);
+    }
 }
