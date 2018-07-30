@@ -108,7 +108,7 @@ fn main() {
     ];
 
     let mut nn = NeuralNetwork::new(image_size, layers.clone());
-    nn.set_dropout(DropoutType::Neuron(0.1));
+    nn.set_dropout(DropoutType::Weight(0.20));
 
     let compute_avg_error = |network: &NeuralNetwork, samples: &[ImageSample]| {
         let total_error = samples.iter().fold(0_f64, |acc, sample| {
@@ -124,7 +124,7 @@ fn main() {
     let mut kasper_samples = load_kasper_samples();
     thread_rng().shuffle(&mut kasper_samples);
 
-    for round in 0..1000 {
+    for round in 0..500 {
         let in_sample_error = compute_avg_error(&nn, training_samples);
         println!("Avg error after {} rounds: {} in-sample, {} out-of-sample",
             round, in_sample_error, compute_avg_error(&nn, test_samples));
@@ -132,7 +132,7 @@ fn main() {
         for _ in 0..1000 {
             let sample = rand::thread_rng().choose(&training_samples).unwrap();
             // nn.train(&sample.values, &sample.label, (-round as f64).exp());
-            nn.train(&sample.values, &sample.label, 0.2_f64);
+            nn.train(&sample.values, &sample.label, 0.1_f64);
         }
 
         /*
@@ -178,5 +178,5 @@ fn main() {
     }
     println!("{}", classification_matrix);
     println!("Misclassified {} out of {} ({}%)", total_misclassified, test_samples.len(),
-        total_misclassified as f64 / test_samples.len() as f64);
+        (total_misclassified as f64 / test_samples.len() as f64) * 100_f64);
 }
