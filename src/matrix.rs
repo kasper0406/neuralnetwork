@@ -3,6 +3,7 @@ use std::ops::{Add, AddAssign, Sub, Mul, Index, IndexMut};
 use rand::{thread_rng, Rng};
 use rand::distributions::Uniform;
 use num::Zero;
+use std::collections::HashSet;
 
 #[derive(Clone)]
 pub struct Matrix<T> {
@@ -73,6 +74,26 @@ impl<T: Copy + Mul<Output=T> + Zero> Matrix<T> {
         let distr = Uniform::new(0_f64, 1_f64);
         return Matrix::new(self.rows(), self.columns(), &|row, column| {
             if thread_rng().sample(distr) < rate {
+                return T::zero();
+            } else {
+                return self[(row, column)];
+            }
+        });
+    }
+
+    pub fn dropout_rows(&self, rate: f64) -> Matrix<T> {
+        assert!(0_f64 <= rate && rate < 1_f64, "Dropout rate must be in interval [0; 1[");
+
+        let distr = Uniform::new(0_f64, 1_f64);
+        let mut rows_to_drop = HashSet::new();
+        for row in 0..self.rows {
+            if thread_rng().sample(distr) < rate {
+                rows_to_drop.insert(row);
+            }
+        }
+        
+        return Matrix::new(self.rows(), self.columns(), &|row, column| {
+            if rows_to_drop.contains(&row) {
                 return T::zero();
             } else {
                 return self[(row, column)];

@@ -13,6 +13,7 @@ use activationfunction::ActivationFunction;
 mod neuralnetwork;
 use neuralnetwork::NeuralNetwork;
 use neuralnetwork::LayerDescription;
+use neuralnetwork::DropoutType;
 
 use std::fs::File;
 use std::io::prelude::*;
@@ -97,7 +98,7 @@ fn main() {
             function: sigmoid
         },
         LayerDescription {
-            num_neurons: 20_usize,
+            num_neurons: 30_usize,
             function: sigmoid
         },
         LayerDescription {
@@ -107,7 +108,7 @@ fn main() {
     ];
 
     let mut nn = NeuralNetwork::new(image_size, layers.clone());
-    nn.set_dropout_rate(0.10);
+    nn.set_dropout(DropoutType::Neuron(0.1));
 
     let compute_avg_error = |network: &NeuralNetwork, samples: &[ImageSample]| {
         let total_error = samples.iter().fold(0_f64, |acc, sample| {
@@ -123,13 +124,15 @@ fn main() {
     let mut kasper_samples = load_kasper_samples();
     thread_rng().shuffle(&mut kasper_samples);
 
-    for round in 0..50 {
+    for round in 0..1000 {
+        let in_sample_error = compute_avg_error(&nn, training_samples);
         println!("Avg error after {} rounds: {} in-sample, {} out-of-sample",
-            round, compute_avg_error(&nn, training_samples), compute_avg_error(&nn, test_samples));
+            round, in_sample_error, compute_avg_error(&nn, test_samples));
 
         for _ in 0..1000 {
             let sample = rand::thread_rng().choose(&training_samples).unwrap();
-            nn.train(&sample.values, &sample.label);
+            // nn.train(&sample.values, &sample.label, (-round as f64).exp());
+            nn.train(&sample.values, &sample.label, 0.2_f64);
         }
 
         /*

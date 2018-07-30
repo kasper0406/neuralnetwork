@@ -13,9 +13,15 @@ pub struct Layer {
     weights: Matrix<f64>
 }
 
+pub enum DropoutType {
+    Weight(f64),
+    Neuron(f64),
+    None
+}
+
 pub struct NeuralNetwork {
     layers: Vec<Layer>,
-    dropout: Option<f64>
+    dropout: DropoutType
 }
 
 #[derive(Clone, Copy)]
@@ -41,12 +47,11 @@ impl NeuralNetwork {
             return network_layer;
         }).collect();
 
-        return NeuralNetwork { layers: layers, dropout: None }
+        return NeuralNetwork { layers: layers, dropout: DropoutType::None }
     }
 
-    pub fn set_dropout_rate(&mut self, rate: f64) {
-        assert!(0_f64 <= rate && rate < 1_f64, "The dropout rate must be in the interval [0; 1[");
-        self.dropout = if rate == 0_f64 { None } else { Some(rate) };
+    pub fn set_dropout(&mut self, dropout: DropoutType) {
+        self.dropout = dropout;
     }
 
     pub fn predict(&self, input: &Matrix<f64>) -> Matrix<f64> {
@@ -73,23 +78,27 @@ impl NeuralNetwork {
         return error;
     }
 
-    fn weight_based_dropout(&self) -> Vec<Matrix<f64>> {
-        return self.layers.iter().map(|layer| {
-            if self.dropout.is_none() {
-                return layer.weights.clone();
-            } else {
-                return layer.weights.dropout_elements(self.dropout.unwrap())
+    fn compute_weights_with_dropouts(&self) -> Vec<Matrix<f64>> {
+        return self.layers.iter().enumerate().map(|(i, layer)| {
+            match self.dropout {
+                DropoutType::None => return layer.weights.clone(),
+                DropoutType::Weight(rate) => return layer.weights.dropout_elements(rate),
+                DropoutType::Neuron(rate) => {
+                    if i == self.layers.len() - 1 {
+                        // Do not drop out result neurons
+                        return layer.weights.clone();
+                    } else {
+                        return layer.weights.dropout_rows(rate);
+                    }
+                }
             }
         }).collect();
     }
 
-    pub fn train(&mut self, input: &Matrix<f64>, expected: &Matrix<f64>) {
-        let weights_with_dropout = self.weight_based_dropout();
+    pub fn train(&mut self, input: &Matrix<f64>, expected: &Matrix<f64>, alpha: f64) {
+        let weights_with_dropout = self.compute_weights_with_dropouts();
         let (predictions, deltas) = self.predict_for_training(input, &weights_with_dropout);
         let prediction = predictions.last().unwrap();
-
-        // let alpha = 10_f64 * self.error_from_prediction(expected, &prediction);
-        let alpha = 1_f64;
 
         let mut layers_with_dropout: Vec<_> = self.layers.iter_mut().zip(weights_with_dropout.iter()).collect();
         let num_layers = layers_with_dropout.len();
