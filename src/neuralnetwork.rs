@@ -4,7 +4,8 @@ use matrix::Matrix;
 use activationfunction::ActivationFunction;
 use std::ops::{Add, AddAssign, Mul, Index};
 use num::Zero;
-use rand::distributions::{Normal, Distribution};
+use rand::{thread_rng, Rng};
+use rand::distributions::{Uniform, Normal, Distribution};
 use std::iter::{Iterator, Rev};
 
 pub struct Layer {
@@ -13,7 +14,8 @@ pub struct Layer {
 }
 
 pub struct NeuralNetwork {
-    layers: Vec<Layer>
+    layers: Vec<Layer>,
+    dropout: Option<f64>
 }
 
 #[derive(Clone, Copy)]
@@ -39,38 +41,18 @@ impl NeuralNetwork {
             return network_layer;
         }).collect();
 
-        return NeuralNetwork { layers: layers }
+        return NeuralNetwork { layers: layers, dropout: None }
+    }
+
+    pub fn set_dropout_rate(&mut self, rate: f64) {
+        assert!(0_f64 <= rate && rate < 1_f64, "The dropout rate must be in the interval [0; 1[");
+        self.dropout = if rate == 0_f64 { None } else { Some(rate) };
     }
 
     pub fn predict(&self, input: &Matrix<f64>) -> Matrix<f64> {
-        let mut predictions = self.predict_with_delta(input).0;
-        return predictions.pop().unwrap();
-    }
-
-    fn predict_with_delta(&self, input: &Matrix<f64>) -> (Vec<Matrix<f64>>, Vec<Matrix<f64>>) {
-        let mut results = Vec::with_capacity(self.layers.len() + 1);
-        results.push(input.clone());
-
-        let mut deltas = Vec::with_capacity(self.layers.len());
-        for layer in &self.layers {
-            let last_result_with_bias;
-            {
-                let last_result = results.last().unwrap();
-                last_result_with_bias = Matrix::new(last_result.rows() + 1, last_result.columns(), &|row, column| {
-                    if row == 0 {
-                        return 1_f64;
-                    } else {
-                        return last_result[(row - 1, column)];
-                    }
-                });
-            }
-
-            let eval: Matrix<f64> = &(layer.weights) * &last_result_with_bias;
-            results.push(layer.function.evaluate(&eval));
-            deltas.push(layer.function.derivative(&eval));
-        }
-
-        return (results, deltas);
+        return self.layers.iter().fold(input.clone(), |acc, layer| {
+            return layer.function.evaluate(&(&layer.weights * &acc.add_constant_row(1_f64)));
+        });
     }
 
     pub fn error(&self, input: &Matrix<f64>, expected: &Matrix<f64>) -> f64 {
@@ -91,19 +73,31 @@ impl NeuralNetwork {
         return error;
     }
 
+    fn weight_based_dropout(&self) -> Vec<Matrix<f64>> {
+        return self.layers.iter().map(|layer| {
+            if self.dropout.is_none() {
+                return layer.weights.clone();
+            } else {
+                return layer.weights.dropout_elements(self.dropout.unwrap())
+            }
+        }).collect();
+    }
+
     pub fn train(&mut self, input: &Matrix<f64>, expected: &Matrix<f64>) {
-        let (predictions, deltas) = self.predict_with_delta(input);
+        let weights_with_dropout = self.weight_based_dropout();
+        let (predictions, deltas) = self.predict_for_training(input, &weights_with_dropout);
         let prediction = predictions.last().unwrap();
 
         // let alpha = 10_f64 * self.error_from_prediction(expected, &prediction);
         let alpha = 1_f64;
 
-        let num_layers = self.layers.len();
+        let mut layers_with_dropout: Vec<_> = self.layers.iter_mut().zip(weights_with_dropout.iter()).collect();
+        let num_layers = layers_with_dropout.len();
         let mut chain = (expected - &prediction).entrywise_product(deltas.last().unwrap());
-        for (i, layer) in self.layers.iter_mut().rev().enumerate() {
+        for (i, (layer, dropout_weights)) in layers_with_dropout.iter_mut().rev().enumerate() {
             let gradient = &chain * &predictions[num_layers - i - 1].add_constant_row(1_f64).transpose();
             if i < num_layers - 1 {
-                chain = (layer.weights.transpose().remove_first_row() * chain).entrywise_product(&deltas[num_layers - 2 - i]);
+                chain = (dropout_weights.transpose().remove_first_row() * chain).entrywise_product(&deltas[num_layers - 2 - i]);
             }
 
             // Do the weight update.
@@ -111,5 +105,22 @@ impl NeuralNetwork {
             let weight_delta = &gradient * alpha;
             layer.weights += weight_delta;
         }
+    }
+
+    fn predict_for_training(&self, input: &Matrix<f64>, weights_with_dropout: &Vec<Matrix<f64>>) -> (Vec<Matrix<f64>>, Vec<Matrix<f64>>) {
+        let mut results = Vec::with_capacity(self.layers.len() + 1);
+        results.push(input.clone());
+
+        let mut deltas = Vec::with_capacity(self.layers.len());
+        let layers_with_dropout: Vec<_> = self.layers.iter().zip(weights_with_dropout.iter()).collect();
+        for (layer, dropout_weights) in layers_with_dropout {
+            let last_result_with_bias = results.last().unwrap().add_constant_row(1_f64);
+            
+            let eval = dropout_weights * &last_result_with_bias;
+            results.push(layer.function.evaluate(&eval));
+            deltas.push(layer.function.derivative(&eval));
+        }
+
+        return (results, deltas);
     }
 }

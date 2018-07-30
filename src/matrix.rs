@@ -1,5 +1,7 @@
 use std::fmt;
 use std::ops::{Add, AddAssign, Sub, Mul, Index, IndexMut};
+use rand::{thread_rng, Rng};
+use rand::distributions::Uniform;
 use num::Zero;
 
 #[derive(Clone)]
@@ -9,7 +11,7 @@ pub struct Matrix<T> {
     values: Vec<T>
 }
 
-impl<T: Copy + Mul<Output=T>> Matrix<T> {
+impl<T: Copy + Mul<Output=T> + Zero> Matrix<T> {
     pub fn new(rows: usize, columns: usize, populator: &Fn(usize, usize) -> T) -> Matrix<T> {
         assert!(rows > 0, "A matrix must have >0 rows");
         assert!(columns > 0, "A matrix must have >0 columns");
@@ -64,6 +66,19 @@ impl<T: Copy + Mul<Output=T>> Matrix<T> {
             return self[(row + 1, column)];
         });
     }
+
+    pub fn dropout_elements(&self, rate: f64) -> Matrix<T> {
+        assert!(0_f64 <= rate && rate < 1_f64, "Dropout rate must be in interval [0; 1[");
+
+        let distr = Uniform::new(0_f64, 1_f64);
+        return Matrix::new(self.rows(), self.columns(), &|row, column| {
+            if thread_rng().sample(distr) < rate {
+                return T::zero();
+            } else {
+                return self[(row, column)];
+            }
+        });
+    }
 }
 
 impl<T> Index<(usize, usize)> for Matrix<T> {
@@ -80,7 +95,7 @@ impl<T> IndexMut<(usize, usize)> for Matrix<T> {
     }
 }
 
-impl<'a, T: Add<Output=T> + Mul<Output=T> + Copy> Add for &'a Matrix<T> {
+impl<'a, T: Add<Output=T> + Mul<Output=T> + Zero + Copy> Add for &'a Matrix<T> {
     type Output = Matrix<T>;
 
     fn add(self, other: &Matrix<T>) -> Matrix<T> {
@@ -106,7 +121,7 @@ impl<T: AddAssign + Copy> AddAssign for Matrix<T> {
     }
 }
 
-impl<'a, T: Sub<Output=T> + Mul<Output=T> + Copy> Sub for &'a Matrix<T> {
+impl<'a, T: Sub<Output=T> + Mul<Output=T> + Zero + Copy> Sub for &'a Matrix<T> {
     type Output = Matrix<T>;
 
     fn sub(self, other: &Matrix<T>) -> Matrix<T> {

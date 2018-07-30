@@ -114,6 +114,7 @@ fn main() {
     ];
 
     let mut nn = NeuralNetwork::new(image_size, layers.clone());
+    nn.set_dropout_rate(0.05);
 
     let compute_avg_error = |network: &NeuralNetwork, samples: &[ImageSample]| {
         let total_error = samples.iter().fold(0_f64, |acc, sample| {
