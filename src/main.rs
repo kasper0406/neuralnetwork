@@ -85,13 +85,6 @@ fn main() {
         }
     };
 
-    /*
-    for i in 0..100 {
-        print_sample(&samples[i].values);
-        println!("{}", &samples[i].label);
-        println!("");
-    } */
-
     let sigmoid = &Sigmoid;
     let layers = vec![
         /*
@@ -114,7 +107,7 @@ fn main() {
     ];
 
     let mut nn = NeuralNetwork::new(image_size, layers.clone());
-    nn.set_dropout_rate(0.05);
+    nn.set_dropout_rate(0.10);
 
     let compute_avg_error = |network: &NeuralNetwork, samples: &[ImageSample]| {
         let total_error = samples.iter().fold(0_f64, |acc, sample| {
@@ -127,7 +120,10 @@ fn main() {
     let training_samples = &samples[0..1000];
     let test_samples = &samples[1000..];
 
-    for round in 0..100 {
+    let mut kasper_samples = load_kasper_samples();
+    thread_rng().shuffle(&mut kasper_samples);
+
+    for round in 0..50 {
         println!("Avg error after {} rounds: {} in-sample, {} out-of-sample",
             round, compute_avg_error(&nn, training_samples), compute_avg_error(&nn, test_samples));
 
@@ -135,15 +131,49 @@ fn main() {
             let sample = rand::thread_rng().choose(&training_samples).unwrap();
             nn.train(&sample.values, &sample.label);
         }
+
+        /*
+        for _ in 0..100 {
+            let sample = rand::thread_rng().choose(&kasper_samples).unwrap();
+            nn.train(&sample.values, &sample.label);
+        } */
     }
 
     println!("Avg error after training: {} in-sample, {} out-of-sample",
             compute_avg_error(&nn, training_samples), compute_avg_error(&nn, test_samples));
 
+    /*
     for kasper_sample in &load_kasper_samples() {
         let prediction = nn.predict(&kasper_sample.values);
         print_sample(&kasper_sample.values);
         println!("Label:\n{}", kasper_sample.label.transpose());
         println!("Prediction:\n{}", prediction);
+    }*/
+
+    println!("");
+    println!("Classification matrix - rows are labels, columns are predictions:");
+    let mut classification_matrix = Matrix::new(10, 10, &|row, col| 0);
+    let mut total_misclassified = 0;
+    for sample in test_samples {
+        let prediction_vector = nn.predict(&sample.values);
+
+        let mut prediction = 0;
+        let mut actual = 0;
+        for i in 0..10 {
+            if prediction_vector[(i, 0)] > prediction_vector[(prediction, 0)] {
+                prediction = i;
+            }
+            if sample.label[(i, 0)] > sample.label[(actual, 0)] {
+                actual = i;
+            }
+        }
+
+        classification_matrix[(actual, prediction)] += 1;
+        if actual != prediction {
+            total_misclassified += 1;
+        }
     }
+    println!("{}", classification_matrix);
+    println!("Misclassified {} out of {} ({}%)", total_misclassified, test_samples.len(),
+        total_misclassified as f64 / test_samples.len() as f64);
 }
