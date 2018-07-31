@@ -95,25 +95,41 @@ impl NeuralNetwork {
         }).collect();
     }
 
-    pub fn train(&mut self, input: &Matrix<f64>, expected: &Matrix<f64>, alpha: f64) {
+    pub fn train(&mut self, input: &Matrix<f64>, expected: &Matrix<f64>, alpha: f64, beta: f64, momentums: Option<Vec<Matrix<f64>>>) -> Vec<Matrix<f64>> {
         let weights_with_dropout = self.compute_weights_with_dropouts();
         let (predictions, deltas) = self.predict_for_training(input, &weights_with_dropout);
         let prediction = predictions.last().unwrap();
 
-        let mut layers_with_dropout: Vec<_> = self.layers.iter_mut().zip(weights_with_dropout.iter()).collect();
-        let num_layers = layers_with_dropout.len();
+        let num_layers = self.layers.len();
+        let mut gradients = Vec::with_capacity(num_layers);
+
         let mut chain = (expected - &prediction).entrywise_product(deltas.last().unwrap());
-        for (i, (layer, dropout_weights)) in layers_with_dropout.iter_mut().rev().enumerate() {
+        for (i, dropout_weights) in weights_with_dropout.iter().rev().enumerate() {
             let gradient = &chain * &predictions[num_layers - i - 1].add_constant_row(1_f64).transpose();
             if i < num_layers - 1 {
                 chain = (dropout_weights.transpose().remove_first_row() * chain).entrywise_product(&deltas[num_layers - 2 - i]);
             }
 
-            // Do the weight update.
-            // This is safe to do now, as the weights for this layer will not be used again
-            let weight_delta = &gradient * alpha;
-            layer.weights += weight_delta;
+            gradients.push(gradient);
         }
+
+        let unwrapped_momentums = momentums.unwrap_or_else(|| {
+            let mut ms = Vec::with_capacity(self.layers.len());
+            for layer in self.layers.iter().rev() {
+                ms.push(Matrix::new(layer.weights.rows(), layer.weights.columns(), &|row, col| 0_f64));
+            }
+            return ms;
+        });
+
+        let mut new_momentums = Vec::with_capacity(num_layers);
+        let weight_updates = self.layers.iter_mut().rev().zip(gradients.iter().zip(unwrapped_momentums.iter()));
+        for (layer, (gradient, momentum)) in weight_updates {
+            let new_momentum = &(beta * momentum) + &gradient;
+            layer.weights += &new_momentum * alpha;
+            new_momentums.push(new_momentum);
+        }
+
+        return new_momentums;
     }
 
     fn predict_for_training(&self, input: &Matrix<f64>, weights_with_dropout: &Vec<Matrix<f64>>) -> (Vec<Matrix<f64>>, Vec<Matrix<f64>>) {
