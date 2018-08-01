@@ -21,7 +21,8 @@ pub enum DropoutType {
 
 pub struct NeuralNetwork {
     layers: Vec<Layer>,
-    dropout: DropoutType
+    dropout: DropoutType,
+    regulizer: Option<fn (&Matrix<f64>) -> Matrix<f64>>
 }
 
 #[derive(Clone, Copy)]
@@ -47,11 +48,19 @@ impl NeuralNetwork {
             return network_layer;
         }).collect();
 
-        return NeuralNetwork { layers: layers, dropout: DropoutType::None }
+        return NeuralNetwork {
+            layers: layers,
+            dropout: DropoutType::None,
+            regulizer: None
+        }
     }
 
     pub fn set_dropout(&mut self, dropout: DropoutType) {
         self.dropout = dropout;
+    }
+
+    pub fn set_regulizer(&mut self, regulizer: fn (&Matrix<f64>) -> Matrix<f64>) {
+        self.regulizer = Some(regulizer);
     }
 
     pub fn predict(&self, input: &Matrix<f64>) -> Matrix<f64> {
@@ -103,9 +112,13 @@ impl NeuralNetwork {
         let num_layers = self.layers.len();
         let mut gradients = Vec::with_capacity(num_layers);
 
-        let mut chain = (expected - &prediction).entrywise_product(deltas.last().unwrap());
+        let mut chain = (prediction - &expected).entrywise_product(deltas.last().unwrap());
         for (i, dropout_weights) in weights_with_dropout.iter().rev().enumerate() {
-            let gradient = &chain * &predictions[num_layers - i - 1].add_constant_row(1_f64).transpose();
+            let mut gradient = &chain * &predictions[num_layers - i - 1].add_constant_row(1_f64).transpose();
+            if self.regulizer.is_some() {
+                gradient += self.regulizer.unwrap()(&dropout_weights);
+            }
+
             if i < num_layers - 1 {
                 chain = (dropout_weights.transpose().remove_first_row() * chain).entrywise_product(&deltas[num_layers - 2 - i]);
             }
@@ -125,7 +138,7 @@ impl NeuralNetwork {
         let weight_updates = self.layers.iter_mut().rev().zip(gradients.iter().zip(unwrapped_momentums.iter()));
         for (layer, (gradient, momentum)) in weight_updates {
             let new_momentum = &(beta * momentum) + &gradient;
-            layer.weights += &new_momentum * alpha;
+            layer.weights += &new_momentum * -alpha;
             new_momentums.push(new_momentum);
         }
 

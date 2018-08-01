@@ -110,6 +110,12 @@ fn main() {
     let mut nn = NeuralNetwork::new(image_size, layers.clone());
     nn.set_dropout(DropoutType::Weight(0.10));
 
+    nn.set_regulizer(|weights: &Matrix<f64>| {
+        return Matrix::new(weights.rows(), weights.columns(), &|row, col| {
+            return 0.0002_f64 * weights[(row, col)];
+        });
+    });
+
     let compute_avg_error = |network: &NeuralNetwork, samples: &[ImageSample]| {
         let total_error = samples.iter().fold(0_f64, |acc, sample| {
             return acc + network.error(&sample.values, &sample.label);
