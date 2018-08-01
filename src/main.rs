@@ -7,7 +7,7 @@ use rand::distributions::{Normal, Distribution};
 use rand::{thread_rng, Rng};
 
 mod activationfunction;
-use activationfunction::Sigmoid;
+use activationfunction::{Relu, Sigmoid};
 use activationfunction::ActivationFunction;
 
 mod neuralnetwork;
@@ -87,11 +87,13 @@ fn main() {
     };
 
     let sigmoid = &Sigmoid;
+    let relu = &Relu;
+
     let layers = vec![
         /*
         LayerDescription {
-            num_neurons: 50_usize,
-            function: sigmoid
+            num_neurons: 80_usize,
+            function: relu
         }, */
         LayerDescription {
             num_neurons: 50_usize,
@@ -109,10 +111,12 @@ fn main() {
 
     let mut nn = NeuralNetwork::new(image_size, layers.clone());
     nn.set_dropout(DropoutType::Weight(0.10));
+    // nn.set_dropout(DropoutType::Neuron(0.05));
 
     nn.set_regulizer(|weights: &Matrix<f64>| {
         return Matrix::new(weights.rows(), weights.columns(), &|row, col| {
-            return 0.0002_f64 * weights[(row, col)];
+            let lambda = 0.00003_f64;
+            return lambda * weights[(row, col)];
         });
     });
 

@@ -29,3 +29,28 @@ impl ActivationFunction<Matrix<f64>> for Sigmoid {
         });
     }
 }
+
+pub struct Relu;
+impl ActivationFunction<f64> for Relu {
+    fn evaluate(&self, x: &f64) -> f64 {
+        return if *x < 0_f64 { 0_f64 } else { *x };
+    }
+
+    fn derivative(&self, x: &f64) -> f64 {
+        return if *x < 0_f64 { 0_f64 } else { 1_f64 };
+    }
+}
+
+impl ActivationFunction<Matrix<f64>> for Relu {
+    fn evaluate(&self, input: &Matrix<f64>) -> Matrix<f64> {
+        return Matrix::new(input.rows(), input.columns(), &|row, column| {
+            return self.evaluate(&input[(row, column)]);
+        });
+    }
+
+    fn derivative(&self, input: &Matrix<f64>) -> Matrix<f64> {
+        return Matrix::new(input.rows(), input.columns(), &|row, column| {
+            return self.derivative(&input[(row, column)]);
+        });
+    }
+}
