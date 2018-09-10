@@ -1,5 +1,6 @@
 extern crate num;
 extern crate rand;
+extern crate futures;
 
 mod matrix;
 use matrix::Matrix;
@@ -17,6 +18,12 @@ use neuralnetwork::DropoutType;
 
 use std::fs::File;
 use std::io::prelude::*;
+
+use futures::executor::ThreadPool;
+use futures::prelude::*;
+
+mod ksuccession;
+use ksuccession::{ KSuccession, Color };
 
 struct ImageSample {
     values: Matrix<f64>,
@@ -55,7 +62,33 @@ fn load_kasper_samples() -> Vec<ImageSample> {
     return result;
 }
 
+fn construct_and_train(alpha: f64, beta: f64, lambda: f64, dropout_rate: f64) -> f64 {
+    println!("Do some heavy work!");
+
+    return 1337_f64;
+}
+
 fn main() {
+
+    let mut game = KSuccession::new(6, 7, 4);
+
+    let actions = vec![0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1];
+    for action in actions {
+        println!("{} playing at column {}", game.get_current_player(), action);
+        if let Some(winner) = game.play(action) {
+            println!("{}", game);
+            println!("{} won the game!", winner);
+            break;
+        }
+        println!("{}", game);
+        println!("");
+    }
+
+    return;
+
+    // let pool = ThreadPool::new().expect("Failed to create thread pool!");
+    // let stream = stream::iter(1..3);
+
     let image_size = 16 * 16;
 
     let mut file = File::open("./data/semeion.data").expect("Data file not found!");
@@ -100,7 +133,7 @@ fn main() {
             function: sigmoid
         },
         LayerDescription {
-            num_neurons: 30_usize,
+            num_neurons: 25_usize,
             function: sigmoid
         },
         LayerDescription {
