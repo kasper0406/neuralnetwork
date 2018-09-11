@@ -22,8 +22,13 @@ use std::io::prelude::*;
 use futures::executor::ThreadPool;
 use futures::prelude::*;
 
+use std::f64;
+
 mod ksuccession;
 use ksuccession::{ KSuccession, Color };
+
+mod ksuccessiontrainer;
+use ksuccessiontrainer::{ KSuccessionTrainer };
 
 struct ImageSample {
     values: Matrix<f64>,
@@ -70,8 +75,57 @@ fn construct_and_train(alpha: f64, beta: f64, lambda: f64, dropout_rate: f64) ->
 
 fn main() {
 
-    let mut game = KSuccession::new(6, 7, 4);
+    let rows = 6;
+    let columns = 7;
+    let sigmoid = &Sigmoid;
 
+    let layers = vec![
+        LayerDescription {
+            num_neurons: 80_usize,
+            function: sigmoid
+        },
+        LayerDescription {
+            num_neurons: 50_usize,
+            function: sigmoid
+        },
+        LayerDescription {
+            num_neurons: 25_usize,
+            function: sigmoid
+        },
+        LayerDescription {
+            num_neurons: 1_usize,
+            function: sigmoid
+        }
+    ];
+
+    let game_factory = || KSuccession::new(6, 7, 4);
+    let mut trainer = KSuccessionTrainer::new(
+        game_factory,
+        NeuralNetwork::new(rows * columns, layers.clone())
+    );
+
+    for i in 0..10000 {
+        if i % 100 == 0 {
+            println!("Playing game {}", i);
+        }
+
+        let trace = trainer.selfplay();
+        trainer.train(&trace);
+    }
+
+    {
+        // Let's play a game for fun
+        let trace = trainer.selfplay();
+
+        let mut game = game_factory();
+        for action in trace.get_actions().iter() {
+            game.play(action.get_action());
+            println!("{}", game);
+        }
+    }
+
+
+    /*
     let actions = vec![0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1];
     for action in actions {
         println!("{} playing at column {}", game.get_current_player(), action);
@@ -83,6 +137,7 @@ fn main() {
         println!("{}", game);
         println!("");
     }
+    */
 
     return;
 
@@ -119,7 +174,6 @@ fn main() {
         }
     };
 
-    let sigmoid = &Sigmoid;
     let relu = &Relu;
 
     let layers = vec![

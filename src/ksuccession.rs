@@ -102,28 +102,54 @@ impl KSuccession {
         return None;
     }
 
+    pub fn is_action_valid(&self, action: usize) -> bool {
+        return self[(0, action)] == None;
+    }
+
     /**
      * plays a move. Returns the winner of the game.
      */
-    pub fn play(&mut self, column: usize) -> Option<Color> {
-        assert!(column <= self.columns, "Play must be within range of game");
-        assert!(self[(0, column)] == None, "Column must not be full");
+    pub fn play(&mut self, action: usize) -> Option<Color> {
+        assert!(action <= self.columns, "Play must be within range of game");
+        assert!(self.is_action_valid(action), "Column must not be full");
 
         let mut i = self.rows - 1;
-        while self[(i, column)] != None {
+        while self[(i, action)] != None {
             i -= 1;
         }
-        self[(i, column)] = Some(self.current_player);
+        self[(i, action)] = Some(self.current_player);
         self.current_player = match self.current_player {
             Color::GREEN => Color::RED,
             Color::RED => Color::GREEN
         };
 
-        return self.get_winner_at_pos(i, column);
+        return self.get_winner_at_pos(i, action);
+    }
+
+    pub fn game_with_action(&self, action: usize) -> Option<KSuccession> {
+        if !self.is_action_valid(action) {
+            return None;
+        }
+
+        let mut new_game = self.clone();
+        new_game.play(action);
+        return Some(new_game);
     }
 
     pub fn get_current_player(&self) -> Color {
         return self.current_player;
+    }
+
+    pub fn get_board(&self) -> &Vec<Option<Color>> {
+        return &self.board;
+    }
+
+    pub fn get_rows(&self) -> usize {
+        return self.rows;
+    }
+
+    pub fn get_columns(&self) -> usize {
+        return self.columns;
     }
 }
 
