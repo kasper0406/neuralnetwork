@@ -76,7 +76,7 @@ impl NeuralNetwork {
         return self.error_from_prediction(expected, &prediction);
     }
 
-    fn error_from_prediction(&self, expected: &Matrix<f64>, prediction: &Matrix<f64>) -> f64 {
+    pub fn error_from_prediction(&self, expected: &Matrix<f64>, prediction: &Matrix<f64>) -> f64 {
         assert!(prediction.columns() == 1, "Expected exactly on column in prediction");
         assert!(expected.rows() == prediction.rows(), "Expected and prediction should have same length!");
 
@@ -104,7 +104,7 @@ impl NeuralNetwork {
         }).collect();
     }
 
-    pub fn train(&mut self, input: &Matrix<f64>, expected: &Matrix<f64>, alpha: f64, beta: f64, momentums: Option<Vec<Matrix<f64>>>) -> Vec<Matrix<f64>> {
+    pub fn train(&mut self, input: &Matrix<f64>, expected: &Matrix<f64>, alpha: f64, beta: f64, momentums: &Option<Vec<Matrix<f64>>>) -> Vec<Matrix<f64>> {
         let weights_with_dropout = self.compute_weights_with_dropouts();
         let (predictions, deltas) = self.predict_for_training(input, &weights_with_dropout);
         let prediction = predictions.last().unwrap();
@@ -126,7 +126,7 @@ impl NeuralNetwork {
             gradients.push(gradient);
         }
 
-        let unwrapped_momentums = momentums.unwrap_or_else(|| {
+        let unwrapped_momentums = momentums.clone().unwrap_or_else(|| {
             let mut ms = Vec::with_capacity(self.layers.len());
             for layer in self.layers.iter().rev() {
                 ms.push(Matrix::new(layer.weights.rows(), layer.weights.columns(), &|row, col| 0_f64));

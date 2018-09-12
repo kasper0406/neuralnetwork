@@ -81,15 +81,15 @@ fn main() {
 
     let layers = vec![
         LayerDescription {
+            num_neurons: 100_usize,
+            function: sigmoid
+        },
+        LayerDescription {
             num_neurons: 80_usize,
             function: sigmoid
         },
         LayerDescription {
             num_neurons: 50_usize,
-            function: sigmoid
-        },
-        LayerDescription {
-            num_neurons: 25_usize,
             function: sigmoid
         },
         LayerDescription {
@@ -104,18 +104,21 @@ fn main() {
         NeuralNetwork::new(rows * columns, layers.clone())
     );
 
-    for i in 0..10000 {
-        if i % 100 == 0 {
-            println!("Playing game {}", i);
+    let mut error = 0_f64;
+    for i in 0..100000 {
+        let report_interval = 100;
+        if i % report_interval == 0 {
+            println!("Playing game nr. {}, avg. error = {}", i, error / (report_interval as f64));
+            error = 0_f64;
         }
 
-        let trace = trainer.selfplay();
-        trainer.train(&trace);
+        let trace = trainer.selfplay(0.1);
+        error += trainer.train(&trace);
     }
 
     {
         // Let's play a game for fun
-        let trace = trainer.selfplay();
+        let trace = trainer.selfplay(0.0);
 
         let mut game = game_factory();
         for action in trace.get_actions().iter() {
@@ -227,9 +230,9 @@ fn main() {
             round, in_sample_error, compute_avg_error(&nn, test_samples));
 
         let mut momentum = None;
-        for _ in 0..1000 {
+        for _ in 0..100000 {
             let sample = rand::thread_rng().choose(&training_samples).unwrap();
-            momentum = Some(nn.train(&sample.values, &sample.label, 0.02_f64, 0.95_f64, momentum));
+            momentum = Some(nn.train(&sample.values, &sample.label, 0.02_f64, 0.95_f64, &momentum));
         }
     }
 
