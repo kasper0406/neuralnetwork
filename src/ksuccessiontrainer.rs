@@ -67,6 +67,8 @@ impl KSuccessionTrainer {
                 None => (), // The action is invalid
                 Some(nn_config) => {
                     let value = self.value_net.predict(&nn_config)[(0, 0)];
+                    // println!("Predicted {} to value {}", game.game_with_action(action).unwrap(), value);
+
                     match best_action {
                         None => best_action = Some((action, value)),
                         Some((_, prev_best)) => {
@@ -132,40 +134,52 @@ impl KSuccessionTrainer {
     /**
      * Train the neural network return the average state error
      */
-    pub fn train(&mut self, trace: &GameTrace) -> f64 {
-        let mut game = &(self.game_factory)();
+    pub fn train(&mut self, trace: &GameTrace, discount_factor: f64) -> f64 {
+        let mut game = (self.game_factory)();
 
-        let expected = &Matrix::new(1, 1, &|row, col| {
-            return match trace.winner {
-                None => 0_f64,
-                Some(player) => KSuccessionTrainer::player_value(player)
-            };
-        });
+        let total_rounds: i32 = trace.actions.len() as i32;
+        let expected = |round: i32| {
+            Matrix::new(1, 1, &|row, col| {
+                return match trace.winner {
+                    None => 0_f64,
+                    Some(player) => KSuccessionTrainer::player_value(player) * discount_factor.powi(total_rounds - 1 - round)
+                };
+            })
+        };
 
-        let alpha = 0.2_f64;
-        let beta = 0.95_f64;
+        let alpha = 0.0002_f64;
+        let beta = 0.90_f64;
 
         let mut error = 0_f64;
         let mut error_terms = 0;
 
-        let get_state_error = |state_value: Option<f64>, value_net: &NeuralNetwork| {
+        let get_state_error = |state_value: Option<f64>, value_net: &NeuralNetwork, expect: &Matrix<f64>| {
             state_value
                 .map(|val| Matrix::new(1, 1, &|_,_| val))
-                .map(|prediction| value_net.error_from_prediction(expected, &prediction))
+                .map(|prediction| value_net.error_from_prediction(expect, &prediction))
                 .unwrap_or(0_f64)
         };
 
-        self.momentums = Some(self.value_net.train(&KSuccessionTrainer::to_nn_config(game), expected, alpha, beta, &self.momentums));
-        error += get_state_error(trace.state_values[0], &self.value_net);
-        error_terms += 1;
+        {
+            let expect = expected(0);
+            self.momentums = Some(self.value_net.train(&KSuccessionTrainer::to_nn_config(&game), &expect, alpha, beta, &self.momentums));
+            error += get_state_error(trace.state_values[0], &self.value_net, &expect);
+            error_terms += 1;
+        }
 
+        let mut i = 1;
         for (action, state_value) in trace.actions.iter().zip(trace.state_values.iter().skip(1)) {
+            game.play(action.action);
             if *state_value != None {
-                self.momentums = Some(self.value_net.train(&KSuccessionTrainer::to_nn_config(game), expected, alpha, beta, &self.momentums));
+                let expect = expected(i.min(total_rounds - 1));
 
-                error += get_state_error(*state_value, &self.value_net);
+                // println!("Training \n{} to {}", game, expect);
+                self.momentums = Some(self.value_net.train(&KSuccessionTrainer::to_nn_config(&game), &expect, alpha, beta, &self.momentums));
+
+                error += get_state_error(*state_value, &self.value_net, &expect);
                 error_terms += 1;
             }
+            i += 1;
         }
 
         return error / (error_terms as f64);

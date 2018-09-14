@@ -8,7 +8,7 @@ use rand::distributions::{Normal, Distribution};
 use rand::{thread_rng, Rng};
 
 mod activationfunction;
-use activationfunction::{Relu, Sigmoid};
+use activationfunction::{Relu, Sigmoid, TwoPlayerScore};
 use activationfunction::ActivationFunction;
 
 mod neuralnetwork;
@@ -77,43 +77,65 @@ fn main() {
 
     let rows = 6;
     let columns = 7;
-    let sigmoid = &Sigmoid;
+    let k = 4;
+
+    /*
+    let rows = 4;
+    let columns = 5;
+    let k = 3;
+    */
+
+    let twoplayerscore = &TwoPlayerScore;
 
     let layers = vec![
+        /*
         LayerDescription {
             num_neurons: 100_usize,
-            function: sigmoid
+            function: twoplayerscore
+        }, */
+        LayerDescription {
+            num_neurons: 150_usize,
+            function: twoplayerscore
         },
         LayerDescription {
             num_neurons: 80_usize,
-            function: sigmoid
+            function: twoplayerscore
         },
         LayerDescription {
             num_neurons: 50_usize,
-            function: sigmoid
+            function: twoplayerscore
         },
         LayerDescription {
             num_neurons: 1_usize,
-            function: sigmoid
+            function: twoplayerscore
         }
     ];
 
     let game_factory = || KSuccession::new(6, 7, 4);
-    let mut trainer = KSuccessionTrainer::new(
-        game_factory,
-        NeuralNetwork::new(rows * columns, layers.clone())
-    );
+    // let game_factory = || KSuccession::new(4, 5, 3);
+
+
+    let mut nn = NeuralNetwork::new(rows * columns, layers.clone());
+    nn.set_dropout(DropoutType::Weight(0.10));
+    nn.set_regulizer(|weights: &Matrix<f64>| {
+        return Matrix::new(weights.rows(), weights.columns(), &|row, col| {
+            let lambda = 0.00003_f64;
+            return lambda * weights[(row, col)];
+        });
+    });
+
+    let mut trainer = KSuccessionTrainer::new(game_factory, nn);
 
     let mut error = 0_f64;
     for i in 0..100000 {
-        let report_interval = 100;
+        let report_interval = 1000;
         if i % report_interval == 0 {
             println!("Playing game nr. {}, avg. error = {}", i, error / (report_interval as f64));
             error = 0_f64;
         }
 
-        let trace = trainer.selfplay(0.1);
-        error += trainer.train(&trace);
+        let trace = trainer.selfplay(0.3);
+        error += trainer.train(&trace, 0.8);
     }
 
     {
@@ -143,6 +165,8 @@ fn main() {
     */
 
     return;
+
+    let sigmoid = &Sigmoid;
 
     // let pool = ThreadPool::new().expect("Failed to create thread pool!");
     // let stream = stream::iter(1..3);
