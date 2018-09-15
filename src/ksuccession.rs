@@ -87,6 +87,10 @@ impl KSuccession {
         if let Some(winner) = self.get_score(row, col, (1, 1)) {
             return Some(winner);
         }
+
+        if let Some(winner) = self.get_score(row, col, (-1, 1)) {
+            return Some(winner);
+        }
         
         return None;
     }
