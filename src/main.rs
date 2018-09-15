@@ -28,7 +28,7 @@ mod ksuccession;
 use ksuccession::{ KSuccession, Color };
 
 mod ksuccessiontrainer;
-use ksuccessiontrainer::{ KSuccessionTrainer };
+use ksuccessiontrainer::{ KSuccessionTrainer, HumanAgent, NeuralNetworkAgent };
 
 struct ImageSample {
     values: Matrix<f64>,
@@ -88,11 +88,10 @@ fn main() {
     let twoplayerscore = &TwoPlayerScore;
 
     let layers = vec![
-        /*
         LayerDescription {
             num_neurons: 100_usize,
             function: twoplayerscore
-        }, */
+        },
         LayerDescription {
             num_neurons: 150_usize,
             function: twoplayerscore
@@ -124,29 +123,31 @@ fn main() {
         });
     });
 
-    let mut trainer = KSuccessionTrainer::new(game_factory, nn);
+    let mut trainer = KSuccessionTrainer::new(game_factory);
+
+    // let agent2 = HumanAgent::new();
+    let mut nn_agent = NeuralNetworkAgent::new(game_factory, nn, 0.4);
 
     let mut error = 0_f64;
-    for i in 0..100000 {
-        let report_interval = 1000;
+    let report_interval = 250;
+    for i in 0..25000 {
         if i % report_interval == 0 {
             println!("Playing game nr. {}, avg. error = {}", i, error / (report_interval as f64));
             error = 0_f64;
         }
 
-        let trace = trainer.selfplay(0.3);
-        error += trainer.train(&trace, 0.8);
+        let trace = trainer.battle(&nn_agent, &nn_agent);
+        error += nn_agent.train(&trace, 0.8);
     }
 
-    {
-        // Let's play a game for fun
-        let trace = trainer.selfplay(0.0);
+    nn_agent.set_exploration_rate(0_f64);
+    nn_agent.set_verbose(true);
 
-        let mut game = game_factory();
-        for action in trace.get_actions().iter() {
-            game.play(action.get_action());
-            println!("{}", game);
-        }
+    let human_agent = HumanAgent::new();
+
+    loop {
+        let trace = trainer.battle(&nn_agent, &human_agent);
+        nn_agent.train(&trace, 0.8);
     }
 
 

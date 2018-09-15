@@ -52,7 +52,7 @@ impl KSuccession {
         let mut count = 1;
         let mut cur_pos = (query_pos.0 + step.0, query_pos.1 + step.1);
         while let Some(_) = self.validate_position(cur_pos) {
-            if (self[cur_pos] == self[query_pos] && count < self.k) {
+            if self[cur_pos] == self[query_pos] && count < self.k {
                 count += 1;
                 cur_pos = (cur_pos.0 + step.0, cur_pos.1 + step.1);
             } else {
@@ -61,7 +61,7 @@ impl KSuccession {
         }
         cur_pos = (query_pos.0 - step.0, query_pos.1 - step.1);
         while let Some(_) = self.validate_position(cur_pos) {
-            if (self[cur_pos] == self[query_pos] && count < self.k) {
+            if self[cur_pos] == self[query_pos] && count < self.k {
                 count += 1;
                 cur_pos = (cur_pos.0 - step.0, cur_pos.1 - step.1);
             } else {
@@ -69,7 +69,7 @@ impl KSuccession {
             }
         }
 
-        if (count >= self.k) {
+        if count >= self.k {
             return self[query_pos];
         }
         return None;
@@ -164,6 +164,9 @@ impl fmt::Display for KSuccession {
                 }
             }
             result = result.and(write!(f, "\n"));
+        }
+        for col in 0..self.columns {
+            result = result.and(write!(f, "{} ", col));
         }
         return result;
     }
