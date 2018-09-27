@@ -32,10 +32,18 @@ impl GameTrace {
     pub fn get_actions(&self) -> &Vec<Action> {
         return &self.actions;
     }
+
+    pub fn get_winner(&self) -> &Option<Color> {
+        return &self.winner;
+    }
 }
 
 pub trait Agent {
     fn play(&self, game: &KSuccession) -> Action;
+}
+
+pub trait TrainableAgent: Agent {
+    fn train(&mut self, trace: &GameTrace, discount_factor: f64) -> f64;
 }
 
 pub struct NeuralNetworkAgent {
@@ -88,7 +96,7 @@ impl NeuralNetworkAgent {
                         Some((_, prev_best)) => {
                             let player_modifier = KSuccessionTrainer::player_value(game.get_current_player());
                             if value * player_modifier > prev_best {
-                                best_action = Some((action, value));
+                                best_action = Some((action, value * player_modifier));
                             }
                         }
                     }
@@ -107,11 +115,13 @@ impl NeuralNetworkAgent {
         }
         return rand::thread_rng().choose(&actions).map(|val| (*val, None));
     }
+}
 
+impl TrainableAgent for NeuralNetworkAgent {
     /**
      * Train the neural network return the average state error
      */
-    pub fn train(&mut self, trace: &GameTrace, discount_factor: f64) -> f64 {
+    fn train(&mut self, trace: &GameTrace, discount_factor: f64) -> f64 {
         let mut game = (self.game_factory)();
 
         let total_rounds: i32 = trace.actions.len() as i32;
@@ -254,7 +264,7 @@ impl KSuccessionTrainer {
 
         GameTrace {
             winner: winner,
-            actions: actions
+            actions: actions,
         }
     }
 }

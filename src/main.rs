@@ -6,6 +6,9 @@ mod matrix;
 use matrix::Matrix;
 use rand::distributions::{Normal, Distribution};
 use rand::{thread_rng, Rng};
+use std::ptr;
+use std::collections::HashMap;
+use std::cell::UnsafeCell;
 
 mod activationfunction;
 use activationfunction::{Relu, Sigmoid, TwoPlayerScore};
@@ -28,7 +31,7 @@ mod ksuccession;
 use ksuccession::{ KSuccession, Color };
 
 mod ksuccessiontrainer;
-use ksuccessiontrainer::{ KSuccessionTrainer, HumanAgent, NeuralNetworkAgent };
+use ksuccessiontrainer::{ KSuccessionTrainer, Agent, TrainableAgent, HumanAgent, NeuralNetworkAgent };
 
 struct ImageSample {
     values: Matrix<f64>,
@@ -67,27 +70,11 @@ fn load_kasper_samples() -> Vec<ImageSample> {
     return result;
 }
 
-fn construct_and_train(alpha: f64, beta: f64, lambda: f64, dropout_rate: f64) -> f64 {
-    println!("Do some heavy work!");
-
-    return 1337_f64;
-}
-
-fn main() {
-
-    let rows = 6;
-    let columns = 7;
-    let k = 4;
-
-    /*
-    let rows = 4;
-    let columns = 5;
-    let k = 3;
-    */
-
+fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<NeuralNetworkAgent>> {
     let twoplayerscore = &TwoPlayerScore;
 
     let layers = vec![
+        /*
         LayerDescription {
             num_neurons: 100_usize,
             function: twoplayerscore
@@ -95,7 +82,7 @@ fn main() {
         LayerDescription {
             num_neurons: 150_usize,
             function: twoplayerscore
-        },
+        }, */
         LayerDescription {
             num_neurons: 80_usize,
             function: twoplayerscore
@@ -110,44 +97,88 @@ fn main() {
         }
     ];
 
+    let num_agents = 3;
+    let mut agents: Vec<UnsafeCell<NeuralNetworkAgent>> = Vec::with_capacity(num_agents);
+
+    let sample_game = game_factory();
+    for i in 0..num_agents {
+        let layers_to_use = &layers[i..];
+        let mut nn = NeuralNetwork::new(sample_game.get_rows() * sample_game.get_columns(), layers_to_use.to_vec());
+        nn.set_dropout(DropoutType::Weight(0.10));
+        nn.set_regulizer(|weights: &Matrix<f64>| {
+            return Matrix::new(weights.rows(), weights.columns(), &|row, col| {
+                let lambda = 0.00003_f64;
+                return lambda * weights[(row, col)];
+            });
+        });
+
+        agents.push(UnsafeCell::new(NeuralNetworkAgent::new(game_factory, nn, 0.4)));
+    }
+
+    return agents;
+}
+
+fn main() {
+
     let game_factory = || KSuccession::new(6, 7, 4);
     // let game_factory = || KSuccession::new(4, 5, 3);
 
+    let mut agents = construct_agents(game_factory);
+    let trainer = KSuccessionTrainer::new(game_factory);
 
-    let mut nn = NeuralNetwork::new(rows * columns, layers.clone());
-    nn.set_dropout(DropoutType::Weight(0.10));
-    nn.set_regulizer(|weights: &Matrix<f64>| {
-        return Matrix::new(weights.rows(), weights.columns(), &|row, col| {
-            let lambda = 0.00003_f64;
-            return lambda * weights[(row, col)];
-        });
-    });
+    // let mut stats = HashMap::new();
+    let mut agent_battle_indexer: Vec<usize> = Vec::with_capacity(agents.len());
+    for i in 0..agents.len() {
+        agent_battle_indexer.push(i);
+    }
 
-    let mut trainer = KSuccessionTrainer::new(game_factory);
-
-    // let agent2 = HumanAgent::new();
-    let mut nn_agent = NeuralNetworkAgent::new(game_factory, nn, 0.4);
+    let mut agent_stats = Matrix::new(agents.len(), agents.len(), &|_,_| 0);
 
     let mut error = 0_f64;
-    let report_interval = 250;
-    for i in 0..25000 {
+    let report_interval = 50;
+    for i in 0..100000 {
         if i % report_interval == 0 {
             println!("Playing game nr. {}, avg. error = {}", i, error / (report_interval as f64));
             error = 0_f64;
+
+            println!("Winner stats:");
+            println!("{}", agent_stats);
         }
 
-        let trace = trainer.battle(&nn_agent, &nn_agent);
-        error += nn_agent.train(&trace, 0.8);
+        thread_rng().shuffle(&mut agent_battle_indexer);
+        for (agent1_index, agent2_index) in agent_battle_indexer.iter().zip(0..agents.len()) {
+            unsafe {
+                let agent1 = &mut *agents[*agent1_index].get();
+                let agent2 = &mut *agents[agent2_index].get();
+
+                let trace = trainer.battle(agent1, agent2);
+                error += agent1.train(&trace, 0.8);
+                if *agent1_index != agent2_index {
+                    error += agent2.train(&trace, 0.8);
+                }
+
+                agent_stats[(*agent1_index, agent2_index)] += match trace.get_winner() {
+                    Some(Color::GREEN) => 1,
+                    Some(Color::RED) => -1,
+                    None => 0
+                };
+            }
+        }
     }
 
-    nn_agent.set_exploration_rate(0_f64);
-    nn_agent.set_verbose(true);
 
-    let human_agent = HumanAgent::new();
+    unsafe {
+        let agent0 = &mut *agents[0].get();
 
-    loop {
-        let trace = trainer.battle(&nn_agent, &human_agent);
-        nn_agent.train(&trace, 0.8);
+        agent0.set_exploration_rate(0_f64);
+        agent0.set_verbose(true);
+
+        let human_agent = HumanAgent::new();
+
+        loop {
+            let trace = trainer.battle(agent0, &human_agent);
+            agent0.train(&trace, 0.8);
+        }
     }
 
 
