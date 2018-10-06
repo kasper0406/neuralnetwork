@@ -1,6 +1,7 @@
 extern crate num;
 extern crate rand;
-extern crate futures;
+// extern crate futures;
+extern crate crossbeam;
 
 mod matrix;
 use matrix::Matrix;
@@ -10,6 +11,7 @@ use std::ptr;
 use std::collections::HashMap;
 use std::cell::UnsafeCell;
 use std::thread;
+use std::rc::Rc;
 
 mod activationfunction;
 use activationfunction::{Relu, Sigmoid, TwoPlayerScore};
@@ -23,8 +25,11 @@ use neuralnetwork::DropoutType;
 use std::fs::File;
 use std::io::prelude::*;
 
-use futures::executor::ThreadPool;
-use futures::prelude::*;
+// use futures::executor::ThreadPool;
+// use futures::prelude::*;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 
 use std::f64;
 
@@ -32,11 +37,19 @@ mod ksuccession;
 use ksuccession::{ KSuccession, Color };
 
 mod ksuccessiontrainer;
-use ksuccessiontrainer::{ KSuccessionTrainer, Agent, TrainableAgent, HumanAgent, NeuralNetworkAgent };
+use ksuccessiontrainer::{ KSuccessionTrainer, Agent, TrainableAgent, HumanAgent, NeuralNetworkAgent, GameTrace };
 
 struct ImageSample {
     values: Matrix<f64>,
     label: Matrix<f64>
+}
+
+struct BattleStats {
+    agent1_index: usize,
+    agent1_error: Option<f64>,
+    agent2_index: usize,
+    agent2_error: Option<f64>,
+    trace: GameTrace
 }
 
 fn load_kasper_samples() -> Vec<ImageSample> {
@@ -71,7 +84,7 @@ fn load_kasper_samples() -> Vec<ImageSample> {
     return result;
 }
 
-fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<NeuralNetworkAgent>> {
+fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> {
     let twoplayerscore = &TwoPlayerScore;
 
     let layers = vec![
@@ -80,11 +93,10 @@ fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<Neural
             num_neurons: 100_usize,
             function: twoplayerscore
         },*/
-        /*
         LayerDescription {
-            num_neurons: 150_usize,
+            num_neurons: 80_usize,
             function: twoplayerscore
-        },*/
+        },
         LayerDescription {
             num_neurons: 80_usize,
             function: twoplayerscore
@@ -99,12 +111,12 @@ fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<Neural
         }
     ];
 
-    let num_agents = 3;
-    let mut agents: Vec<UnsafeCell<NeuralNetworkAgent>> = Vec::with_capacity(num_agents);
+    let num_agents = 2 * 4;
+    let mut agents: Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> = Vec::with_capacity(num_agents);
 
     let sample_game = game_factory();
     for i in 0..num_agents {
-        let layers_to_use = &layers[i..];
+        let layers_to_use = &layers[i / 2..];
         let mut nn = NeuralNetwork::new(sample_game.get_rows() * sample_game.get_columns(), layers_to_use.to_vec());
         nn.set_dropout(DropoutType::Weight(0.10));
         nn.set_regulizer(|weights: &Matrix<f64>| {
@@ -114,13 +126,14 @@ fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<Neural
             });
         });
 
-        agents.push(UnsafeCell::new(NeuralNetworkAgent::new(game_factory, nn, 0.4)));
+        agents.push(UnsafeCell::new(Mutex::new(NeuralNetworkAgent::new(game_factory, nn, 0.4))));
     }
 
     return agents;
 }
 
 fn main() {
+    let lock_acquire_mutex = Arc::new(Mutex::new(0));
 
     let game_factory = || KSuccession::new(6, 7, 4);
     // let game_factory = || KSuccession::new(4, 5, 3);
@@ -149,46 +162,96 @@ fn main() {
             println!("{}", agent_stats);
         }
 
-        // let battle_threads = Vec::with_capacity(2 * agents.len());
+        let mut battle_threads = Vec::with_capacity(2 * agents.len());
 
         thread_rng().shuffle(&mut agent_battle_indexer);
-        for (agent1_index, agent2_index) in agent_battle_indexer.iter().zip(0..agents.len()) {
-            let battle_trainer_thread = thread::spawn(|| {
+
+        crossbeam::scope(|battle_scope| {
+            for (agent1_index_tmp, agent2_index_tmp) in agent_battle_indexer.iter().zip(0..agents.len()) {
+                let agent1_index = (*agent1_index_tmp).clone();
+                let agent2_index = agent2_index_tmp.clone();
+
+                let thread_trainer = trainer.clone();
+
+                let mut agent1_mutex;
+                let mut agent2_mutex;
                 unsafe {
-                    let agent1 = &mut *agents[*agent1_index].get();
-                    let agent2 = &mut *agents[agent2_index].get();
-
-                    let trace = trainer.battle(agent1, agent2);
-
-                    let trace1 = trace.clone();
-                    let agent1_train_thread = thread::spawn(move || {
-                        agent1.train(&trace1, 0.8);
-                    });
-                    // agent_errors[(*agent1_index, 0)] += agent1.train(&trace, 0.8);
-                    if *agent1_index != agent2_index {
-                        let trace2 = trace.clone();
-                        let agent2_train_thread = thread::spawn(move || {
-                            agent2.train(&trace2, 0.8);
-                        });
-                        agent2_train_thread.join().unwrap();
-                        // agent_errors[(agent2_index, 0)] += agent2.train(&trace, 0.8);
-                    }
-                    agent1_train_thread.join().unwrap();
-
-                    agent_stats[(*agent1_index, agent2_index)] += match trace.get_winner() {
-                        Some(Color::GREEN) => 1,
-                        Some(Color::RED) => -1,
-                        None => 0
-                    };
+                    agent1_mutex = &mut *agents[agent1_index].get();
+                    agent2_mutex = &mut *agents[agent2_index].get();
                 }
-            });
-            battle_trainer_thread.join().unwrap();
-        }
+
+                let lock_acqure_mutex_clone = lock_acquire_mutex.clone();
+                battle_threads.push(battle_scope.spawn(move || {
+                    let mut agent1;
+                    let mut agent2 = None;
+                    {
+                        let guard = lock_acqure_mutex_clone.lock().unwrap();
+                        agent1 = agent1_mutex.lock().unwrap();
+                        if agent1_index != agent2_index {
+                            agent2 = Some(agent2_mutex.lock().unwrap());
+                        }
+                        drop(guard);
+                    }
+
+                    let train_agent = |agent: &mut NeuralNetworkAgent, trace: GameTrace| {
+                        agent.train(&trace, 0.8)
+                    };
+
+                    let mut agent1_error = None;
+                    let mut agent2_error = None;
+                    let trace;
+
+                    if agent2.is_none() {
+                        trace = thread_trainer.battle(&*agent1, &*agent1);
+                        agent1_error = Some(train_agent(&mut *agent1, trace.clone()));
+                    } else {
+                        let mut agent1_ref = &mut *agent1;
+                        let mut agent2_ref = &mut *agent2.unwrap();
+                        trace = thread_trainer.battle(agent1_ref, agent2_ref);
+
+                        crossbeam::scope(|train_scope| {
+                            let trace_clone_1 = trace.clone();
+                            let trace_clone_2 = trace.clone();
+                            let agent1_trainer_thread = train_scope.spawn(move || {
+                                return train_agent(&mut agent1_ref, trace_clone_1)
+                            });
+                            let agent2_trainer_thread = train_scope.spawn(move || {
+                                return train_agent(&mut agent2_ref, trace_clone_2)
+                            });
+
+                            agent1_error = Some(agent1_trainer_thread.join().unwrap());
+                            agent2_error = Some(agent2_trainer_thread.join().unwrap());
+                        });
+                    }
+
+                    return BattleStats {
+                        agent1_index: agent1_index,
+                        agent1_error: agent1_error,
+                        agent2_index: agent2_index,
+                        agent2_error: agent2_error,
+                        trace: trace
+                    };
+                }));
+            }
+
+            for battle_thread in battle_threads {
+                let stats = battle_thread.join().unwrap();
+
+                agent_stats[(stats.agent1_index, stats.agent2_index)] += match stats.trace.get_winner() {
+                    Some(Color::GREEN) => 1,
+                    Some(Color::RED) => -1,
+                    None => 0
+                };
+
+                agent_errors[(stats.agent1_index, 0)] += stats.agent1_error.unwrap_or(0_f64);
+                agent_errors[(stats.agent2_index, 0)] += stats.agent2_error.unwrap_or(0_f64);
+            }
+        });
     }
 
 
     unsafe {
-        let agent0 = &mut *agents[0].get();
+        let mut agent0 = (&mut *agents[0].get()).lock().unwrap();
 
         agent0.set_exploration_rate(0_f64);
         agent0.set_verbose(true);
@@ -196,7 +259,7 @@ fn main() {
         let human_agent = HumanAgent::new();
 
         loop {
-            let trace = trainer.battle(agent0, &human_agent);
+            let trace = trainer.battle(&*agent0, &human_agent);
             agent0.train(&trace, 0.8);
         }
     }

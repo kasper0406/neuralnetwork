@@ -7,3 +7,4 @@ authors = ["Kasper Nielsen <kasper0406@gmail.com>"]
 num = "*"
 rand = "*"
 futures-preview = "*"
+crossbeam = "0.4"

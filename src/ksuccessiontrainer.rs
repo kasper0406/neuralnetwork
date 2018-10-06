@@ -8,6 +8,7 @@ use rand::distributions::Uniform;
 use std::iter::Iterator;
 use std::io;
 
+#[derive(Clone)]
 pub struct KSuccessionTrainer {
     game_factory: fn () -> KSuccession,
 }
@@ -178,7 +179,7 @@ impl Agent for NeuralNetworkAgent {
     fn play(&self, game: &KSuccession) -> Action {
         let distr = Uniform::new(0_f64, 1_f64);
 
-        let mut best_action = if thread_rng().sample(distr) < self.exploration_rate {
+        let best_action = if thread_rng().sample(distr) < self.exploration_rate {
             // Random exploration move
             (self.sample_random_action(&game), true)
         } else {
