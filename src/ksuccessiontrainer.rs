@@ -12,6 +12,7 @@ pub struct KSuccessionTrainer {
     game_factory: fn () -> KSuccession,
 }
 
+#[derive(Clone)]
 pub struct Action {
     action: usize,
     is_exploratory: bool
@@ -23,6 +24,7 @@ impl Action {
     }
 }
 
+#[derive(Clone)]
 pub struct GameTrace {
     winner: Option<Color>,
     actions: Vec<Action>
@@ -95,8 +97,8 @@ impl NeuralNetworkAgent {
                         None => best_action = Some((action, value)),
                         Some((_, prev_best)) => {
                             let player_modifier = KSuccessionTrainer::player_value(game.get_current_player());
-                            if value * player_modifier > prev_best {
-                                best_action = Some((action, value * player_modifier));
+                            if value * player_modifier > prev_best * player_modifier {
+                                best_action = Some((action, value));
                             }
                         }
                     }

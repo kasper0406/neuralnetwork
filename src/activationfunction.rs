@@ -1,6 +1,6 @@
 use matrix::Matrix;
 
-pub trait ActivationFunction<T> {
+pub trait ActivationFunction<T>: Send + Sync {
     fn evaluate(&self, &T) -> T;
     fn derivative(&self, &T) -> T;
 }

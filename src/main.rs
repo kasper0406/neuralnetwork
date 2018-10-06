@@ -9,6 +9,7 @@ use rand::{thread_rng, Rng};
 use std::ptr;
 use std::collections::HashMap;
 use std::cell::UnsafeCell;
+use std::thread;
 
 mod activationfunction;
 use activationfunction::{Relu, Sigmoid, TwoPlayerScore};
@@ -78,11 +79,12 @@ fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<Neural
         LayerDescription {
             num_neurons: 100_usize,
             function: twoplayerscore
-        },
+        },*/
+        /*
         LayerDescription {
             num_neurons: 150_usize,
             function: twoplayerscore
-        }, */
+        },*/
         LayerDescription {
             num_neurons: 80_usize,
             function: twoplayerscore
@@ -126,43 +128,61 @@ fn main() {
     let mut agents = construct_agents(game_factory);
     let trainer = KSuccessionTrainer::new(game_factory);
 
-    // let mut stats = HashMap::new();
     let mut agent_battle_indexer: Vec<usize> = Vec::with_capacity(agents.len());
     for i in 0..agents.len() {
         agent_battle_indexer.push(i);
     }
 
     let mut agent_stats = Matrix::new(agents.len(), agents.len(), &|_,_| 0);
+    let mut agent_errors = Matrix::new(agents.len(), 1, &|_,_| 0_f64);
 
-    let mut error = 0_f64;
-    let report_interval = 50;
-    for i in 0..100000 {
+    let report_interval = 100;
+    for i in 0..500000 {
         if i % report_interval == 0 {
-            println!("Playing game nr. {}, avg. error = {}", i, error / (report_interval as f64));
-            error = 0_f64;
+            println!("Playing game nr. {}", i);
+            for agent_index in 0..agents.len() {
+                println!("Agent {} error: {}", agent_index, agent_errors[(agent_index, 0)] / (report_interval as f64));
+                agent_errors[(agent_index, 0)] = 0_f64;
+            }
 
             println!("Winner stats:");
             println!("{}", agent_stats);
         }
 
+        // let battle_threads = Vec::with_capacity(2 * agents.len());
+
         thread_rng().shuffle(&mut agent_battle_indexer);
         for (agent1_index, agent2_index) in agent_battle_indexer.iter().zip(0..agents.len()) {
-            unsafe {
-                let agent1 = &mut *agents[*agent1_index].get();
-                let agent2 = &mut *agents[agent2_index].get();
+            let battle_trainer_thread = thread::spawn(|| {
+                unsafe {
+                    let agent1 = &mut *agents[*agent1_index].get();
+                    let agent2 = &mut *agents[agent2_index].get();
 
-                let trace = trainer.battle(agent1, agent2);
-                error += agent1.train(&trace, 0.8);
-                if *agent1_index != agent2_index {
-                    error += agent2.train(&trace, 0.8);
+                    let trace = trainer.battle(agent1, agent2);
+
+                    let trace1 = trace.clone();
+                    let agent1_train_thread = thread::spawn(move || {
+                        agent1.train(&trace1, 0.8);
+                    });
+                    // agent_errors[(*agent1_index, 0)] += agent1.train(&trace, 0.8);
+                    if *agent1_index != agent2_index {
+                        let trace2 = trace.clone();
+                        let agent2_train_thread = thread::spawn(move || {
+                            agent2.train(&trace2, 0.8);
+                        });
+                        agent2_train_thread.join().unwrap();
+                        // agent_errors[(agent2_index, 0)] += agent2.train(&trace, 0.8);
+                    }
+                    agent1_train_thread.join().unwrap();
+
+                    agent_stats[(*agent1_index, agent2_index)] += match trace.get_winner() {
+                        Some(Color::GREEN) => 1,
+                        Some(Color::RED) => -1,
+                        None => 0
+                    };
                 }
-
-                agent_stats[(*agent1_index, agent2_index)] += match trace.get_winner() {
-                    Some(Color::GREEN) => 1,
-                    Some(Color::RED) => -1,
-                    None => 0
-                };
-            }
+            });
+            battle_trainer_thread.join().unwrap();
         }
     }
 
