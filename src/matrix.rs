@@ -4,6 +4,7 @@ use rand::{thread_rng, Rng};
 use rand::distributions::Uniform;
 use num::Zero;
 use std::collections::HashSet;
+use std::cmp;
 
 use rayon::prelude::*;
 
@@ -26,27 +27,10 @@ impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + Sync + AddAssign + Ad
             }
         }
 
-        /*
-        let mut values = vec![T::zero(); rows * columns];
-        let chunk_size = 1 * columns;
-        values.as_mut_slice()
-                .par_chunks_mut(chunk_size)
-                .enumerate()
-                .for_each(|(chunk_num, chunk)| {
-                    let chunk_row_start = chunk_num * chunk_size / columns;
-
-                    for chunk_index in 0..chunk_size {
-                        let row_num = chunk_row_start + chunk_index / columns;
-                        let col_num = chunk_index % columns;
-                        chunk[chunk_index] = populator(row_num, col_num);
-                    }
-                });
-        */
-
-        return Matrix { rows: rows, columns: columns, values: values }
+        Matrix { rows: rows, columns: columns, values: values }
     }
 
-    fn slow_mul(self, rhs: &Matrix<T>) -> Matrix<T> {
+    pub fn slow_mul(self, rhs: &Matrix<T>) -> Matrix<T> {
         assert!(self.columns == rhs.rows, "Columns in lhs must match rows in rhs");
 
         return Matrix::new(self.rows, rhs.columns, &|row, column| {
@@ -60,17 +44,17 @@ impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + Sync + AddAssign + Ad
     }
 
     pub fn transpose(&self) -> Matrix<T> {
-        return Matrix::new(self.columns, self.rows, &|row, column| {
+        Matrix::new(self.columns, self.rows, &|row, column| {
             return self[(column, row)];
-        });
+        })
     }
 
     pub fn rows(&self) -> usize {
-        return self.rows;
+        self.rows
     }
 
     pub fn columns(&self) -> usize {
-        return self.columns;
+        self.columns
     }
 
     pub fn size(&self) -> (usize, usize) {
@@ -79,9 +63,9 @@ impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + Sync + AddAssign + Ad
 
     pub fn entrywise_product(&self, other: &Matrix<T>) -> Matrix<T> {
         assert!(self.size() == other.size(), "Matrices must have the same size!");
-        return Matrix::new(self.rows(), self.columns(), &|row, column| {
+        Matrix::new(self.rows(), self.columns(), &|row, column| {
             return self[(row, column)] * other[(row, column)];
-        });
+        })
     }
 
     pub fn add_constant_row(&self, value: T) -> Matrix<T> {
@@ -194,14 +178,17 @@ impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Syn
         assert!(self.columns == rhs.rows, "Columns in lhs must match rows in rhs");
 
         let mut values = vec![T::zero(); self.rows * rhs.columns];
-        let chunk_size = 1 * rhs.columns;
+
+        let column_multiplier = cmp::max(1, 30 / rhs.columns);
+        let chunk_size = cmp::min(values.len(), column_multiplier * rhs.columns);
+        // println!("Multiplier = {}, chunk_size = {}", column_multiplier, chunk_size);
         values.as_mut_slice()
                 .par_chunks_mut(chunk_size)
                 .enumerate()
                 .for_each(|(chunk_num, chunk)| {
                     let chunk_row_start = chunk_num * chunk_size / rhs.columns;
 
-                    for chunk_index in 0..chunk_size {
+                    for chunk_index in 0..chunk.len() {
                         let row_num = chunk_row_start + chunk_index / rhs.columns;
                         let col_num = chunk_index % rhs.columns;
 

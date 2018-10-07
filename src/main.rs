@@ -90,17 +90,31 @@ fn load_kasper_samples() -> Vec<ImageSample> {
     return result;
 }
 
+fn construct_agent(game_factory: fn () -> KSuccession, layers: &[LayerDescription]) -> NeuralNetworkAgent {
+    let sample_game = game_factory();
+
+    let mut nn = NeuralNetwork::new(sample_game.get_rows() * sample_game.get_columns(), layers.to_vec());
+    nn.set_dropout(DropoutType::Weight(0.10));
+    nn.set_regulizer(|weights: &Matrix<f64>| {
+        return Matrix::new(weights.rows(), weights.columns(), &|row, col| {
+            let lambda = 0.00003_f64;
+            return lambda * weights[(row, col)];
+        });
+    });
+
+    NeuralNetworkAgent::new(game_factory, nn, 0.4)
+}
+
 fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> {
     let twoplayerscore = &TwoPlayerScore;
 
     let layers = vec![
-        /*
         LayerDescription {
             num_neurons: 100_usize,
             function: twoplayerscore
-        },*/
+        },
         LayerDescription {
-            num_neurons: 80_usize,
+            num_neurons: 160_usize,
             function: twoplayerscore
         },
         LayerDescription {
@@ -117,29 +131,20 @@ fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<Mutex<
         }
     ];
 
-    let num_agents = 2 * 4;
+    let num_agents = 5;
     let mut agents: Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> = Vec::with_capacity(num_agents);
 
     let sample_game = game_factory();
     for i in 0..num_agents {
-        let layers_to_use = &layers[i / 2..];
-        let mut nn = NeuralNetwork::new(sample_game.get_rows() * sample_game.get_columns(), layers_to_use.to_vec());
-        nn.set_dropout(DropoutType::Weight(0.10));
-        nn.set_regulizer(|weights: &Matrix<f64>| {
-            return Matrix::new(weights.rows(), weights.columns(), &|row, col| {
-                let lambda = 0.00003_f64;
-                return lambda * weights[(row, col)];
-            });
-        });
-
-        agents.push(UnsafeCell::new(Mutex::new(NeuralNetworkAgent::new(game_factory, nn, 0.4))));
+        let layers_to_use = &layers[i..];
+        agents.push(UnsafeCell::new(Mutex::new(construct_agent(game_factory, layers_to_use))));
     }
 
     return agents;
 }
 
 #[bench]
-fn test_ordinary_multiply(b: &mut Bencher) {
+fn bench_threaded_multiply(b: &mut Bencher) {
     b.iter(|| {
         let a = Matrix::new(200, 200, &|row, col| { row + col });
         let b = Matrix::new(200, 200, &|row, col| { row + col });
@@ -149,23 +154,53 @@ fn test_ordinary_multiply(b: &mut Bencher) {
 }
 
 #[bench]
-fn test_fast_multiply(b: &mut Bencher) {
+fn bench_single_thread_multiply(b: &mut Bencher) {
     b.iter(|| {
         let a = Matrix::new(200, 200, &|row, col| { row + col });
         let b = Matrix::new(200, 200, &|row, col| { row + col });
 
-        test::black_box(a.fast_mul(&b));
+        test::black_box(a.slow_mul(&b));
     });
 }
 
-fn main() {
+#[bench]
+fn bench_entrywise_product_test(b: &mut Bencher) {
+    b.iter(|| {
+        let a = Matrix::new(1000, 1000, &|row, col| { row + col });
+        let b = Matrix::new(1000, 1000, &|row, col| { row - col });
+        test::black_box(a.entrywise_product(&b));
+    });
+}
+
+#[bench]
+fn bench_agent_training(b: &mut Bencher) {
+    b.iter(|| {
+        let game_factory = || KSuccession::new(6, 7, 4);
+        let twoplayerscore = &TwoPlayerScore;
+
+        let num_agents = 4;
+        let mut agents: Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> = Vec::with_capacity(num_agents);
+        let layers = vec![
+            LayerDescription {
+                num_neurons: 200_usize,
+                function: twoplayerscore
+            },
+            LayerDescription {
+                num_neurons: 1_usize,
+                function: twoplayerscore
+            }
+        ];
+        for i in 0..num_agents {
+            agents.push(UnsafeCell::new(Mutex::new(construct_agent(game_factory, &layers))));
+        }
+
+        let trainer = KSuccessionTrainer::new(game_factory);
+        test::black_box(battle_agents(1, &trainer, &agents));
+    });
+}
+
+fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCell<Mutex<NeuralNetworkAgent>>]) {
     let lock_acquire_mutex = Arc::new(Mutex::new(0));
-
-    let game_factory = || KSuccession::new(6, 7, 4);
-    // let game_factory = || KSuccession::new(4, 5, 3);
-
-    let mut agents = construct_agents(game_factory);
-    let trainer = KSuccessionTrainer::new(game_factory);
 
     let mut agent_battle_indexer: Vec<usize> = Vec::with_capacity(agents.len());
     for i in 0..agents.len() {
@@ -175,8 +210,10 @@ fn main() {
     let mut agent_stats = Matrix::new(agents.len(), agents.len(), &|_,_| 0);
     let mut agent_errors = Matrix::new(agents.len(), 1, &|_,_| 0_f64);
 
-    let report_interval = 100;
-    for i in 0..500000 {
+    // TODO(knielsen): Figure out a way to save agent state
+    let report_interval = 1000;
+    let mut prev_agent_stats = agent_stats.clone();
+    for i in 0..rounds {
         if i % report_interval == 0 {
             println!("Playing game nr. {}", i);
             for agent_index in 0..agents.len() {
@@ -184,8 +221,13 @@ fn main() {
                 agent_errors[(agent_index, 0)] = 0_f64;
             }
 
-            println!("Winner stats:");
-            println!("{}", agent_stats);
+            println!("");
+            println!("Winner stats (total):");
+            println!("{}", &agent_stats);
+
+            println!("Winner stats (this interval)");
+            println!("{}", &agent_stats - &prev_agent_stats);
+            prev_agent_stats = agent_stats.clone();
         }
 
         let mut battle_threads = Vec::with_capacity(2 * agents.len());
@@ -274,7 +316,15 @@ fn main() {
             }
         });
     }
+}
 
+fn main() {
+    let game_factory = || KSuccession::new(6, 7, 4);
+    // let game_factory = || KSuccession::new(4, 5, 3);
+    let trainer = KSuccessionTrainer::new(game_factory);
+
+    let mut agents = construct_agents(game_factory);
+    battle_agents(1000000, &trainer, &agents);
 
     unsafe {
         let mut agent0 = (&mut *agents[0].get()).lock().unwrap();
