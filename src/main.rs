@@ -1,7 +1,10 @@
+#![feature(test)]
+
 extern crate num;
 extern crate rand;
 // extern crate futures;
 extern crate crossbeam;
+extern crate rayon;
 
 mod matrix;
 use matrix::Matrix;
@@ -38,6 +41,9 @@ use ksuccession::{ KSuccession, Color };
 
 mod ksuccessiontrainer;
 use ksuccessiontrainer::{ KSuccessionTrainer, Agent, TrainableAgent, HumanAgent, NeuralNetworkAgent, GameTrace };
+
+extern crate test;
+use test::Bencher;
 
 struct ImageSample {
     values: Matrix<f64>,
@@ -130,6 +136,26 @@ fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<Mutex<
     }
 
     return agents;
+}
+
+#[bench]
+fn test_ordinary_multiply(b: &mut Bencher) {
+    b.iter(|| {
+        let a = Matrix::new(200, 200, &|row, col| { row + col });
+        let b = Matrix::new(200, 200, &|row, col| { row + col });
+
+        test::black_box(a * b);
+    });
+}
+
+#[bench]
+fn test_fast_multiply(b: &mut Bencher) {
+    b.iter(|| {
+        let a = Matrix::new(200, 200, &|row, col| { row + col });
+        let b = Matrix::new(200, 200, &|row, col| { row + col });
+
+        test::black_box(a.fast_mul(&b));
+    });
 }
 
 fn main() {

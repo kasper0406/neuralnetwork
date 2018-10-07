@@ -5,6 +5,8 @@ use rand::distributions::Uniform;
 use num::Zero;
 use std::collections::HashSet;
 
+use rayon::prelude::*;
+
 #[derive(Clone)]
 pub struct Matrix<T> {
     rows: usize,
@@ -12,8 +14,8 @@ pub struct Matrix<T> {
     values: Vec<T>
 }
 
-impl<T: Copy + Mul<Output=T> + Zero> Matrix<T> {
-    pub fn new(rows: usize, columns: usize, populator: &Fn(usize, usize) -> T) -> Matrix<T> {
+impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + Sync + AddAssign + Add<Output=T>> Matrix<T> {
+    pub fn new<F: Fn(usize, usize) -> T + Sync>(rows: usize, columns: usize, populator: &F) -> Matrix<T> {
         assert!(rows > 0, "A matrix must have >0 rows");
         assert!(columns > 0, "A matrix must have >0 columns");
 
@@ -24,7 +26,37 @@ impl<T: Copy + Mul<Output=T> + Zero> Matrix<T> {
             }
         }
 
+        /*
+        let mut values = vec![T::zero(); rows * columns];
+        let chunk_size = 1 * columns;
+        values.as_mut_slice()
+                .par_chunks_mut(chunk_size)
+                .enumerate()
+                .for_each(|(chunk_num, chunk)| {
+                    let chunk_row_start = chunk_num * chunk_size / columns;
+
+                    for chunk_index in 0..chunk_size {
+                        let row_num = chunk_row_start + chunk_index / columns;
+                        let col_num = chunk_index % columns;
+                        chunk[chunk_index] = populator(row_num, col_num);
+                    }
+                });
+        */
+
         return Matrix { rows: rows, columns: columns, values: values }
+    }
+
+    fn slow_mul(self, rhs: &Matrix<T>) -> Matrix<T> {
+        assert!(self.columns == rhs.rows, "Columns in lhs must match rows in rhs");
+
+        return Matrix::new(self.rows, rhs.columns, &|row, column| {
+            let mut res: T = T::zero();
+            for i in 0..self.columns {
+                res += self[(row, i)] * rhs[(i, column)];
+            }
+
+            return res;
+        });
     }
 
     pub fn transpose(&self) -> Matrix<T> {
@@ -116,7 +148,7 @@ impl<T> IndexMut<(usize, usize)> for Matrix<T> {
     }
 }
 
-impl<'a, T: Add<Output=T> + Mul<Output=T> + Zero + Copy> Add for &'a Matrix<T> {
+impl<'a, T: Add<Output=T> + Mul<Output=T> + AddAssign + Zero + Send + Sync + Copy> Add for &'a Matrix<T> {
     type Output = Matrix<T>;
 
     fn add(self, other: &Matrix<T>) -> Matrix<T> {
@@ -142,7 +174,7 @@ impl<T: AddAssign + Copy> AddAssign for Matrix<T> {
     }
 }
 
-impl<'a, T: Sub<Output=T> + Mul<Output=T> + Zero + Copy> Sub for &'a Matrix<T> {
+impl<'a, T: Sub<Output=T> + Mul<Output=T> + AddAssign + Zero + Send + Sync + Copy> Sub for &'a Matrix<T> {
     type Output = Matrix<T>;
 
     fn sub(self, other: &Matrix<T>) -> Matrix<T> {
@@ -155,20 +187,33 @@ impl<'a, T: Sub<Output=T> + Mul<Output=T> + Zero + Copy> Sub for &'a Matrix<T> {
     }
 }
 
-impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero> Mul for &'a Matrix<T> {
+impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync> Mul for &'a Matrix<T> {
     type Output = Matrix<T>;
 
     fn mul(self, rhs: &Matrix<T>) -> Matrix<T> {
         assert!(self.columns == rhs.rows, "Columns in lhs must match rows in rhs");
 
-        return Matrix::new(self.rows, rhs.columns, &|row, column| {
-            let mut res: T = T::zero();
-            for i in 0..self.columns {
-                res += self[(row, i)] * rhs[(i, column)];
-            }
+        let mut values = vec![T::zero(); self.rows * rhs.columns];
+        let chunk_size = 1 * rhs.columns;
+        values.as_mut_slice()
+                .par_chunks_mut(chunk_size)
+                .enumerate()
+                .for_each(|(chunk_num, chunk)| {
+                    let chunk_row_start = chunk_num * chunk_size / rhs.columns;
 
-            return res;
-        });
+                    for chunk_index in 0..chunk_size {
+                        let row_num = chunk_row_start + chunk_index / rhs.columns;
+                        let col_num = chunk_index % rhs.columns;
+
+                        let mut res: T = T::zero();
+                        for k in 0..self.columns {
+                            res += self[(row_num, k)] * rhs[(k, col_num)];
+                        }
+                        chunk[chunk_index] = res;
+                    }
+                });
+        
+        Matrix { rows: self.rows, columns: rhs.columns, values: values }
     }
 }
 
@@ -190,7 +235,7 @@ impl<'a> Mul<&'a Matrix<f64>> for f64 {
     }
 }
 
-impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero> Mul for Matrix<T> {
+impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync> Mul for Matrix<T> {
     type Output = Matrix<T>;
 
     fn mul(self, rhs: Matrix<T>) -> Matrix<T> {
