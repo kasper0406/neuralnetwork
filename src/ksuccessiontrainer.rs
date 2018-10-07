@@ -46,7 +46,7 @@ pub trait Agent {
 }
 
 pub trait TrainableAgent: Agent {
-    fn train(&mut self, trace: &GameTrace, discount_factor: f64) -> f64;
+    fn train(&mut self, trace: &GameTrace, discount_factor: f64, player: Color) -> f64;
 }
 
 pub struct NeuralNetworkAgent {
@@ -124,7 +124,7 @@ impl TrainableAgent for NeuralNetworkAgent {
     /**
      * Train the neural network return the average state error
      */
-    fn train(&mut self, trace: &GameTrace, discount_factor: f64) -> f64 {
+    fn train(&mut self, trace: &GameTrace, discount_factor: f64, player: Color) -> f64 {
         let mut game = (self.game_factory)();
 
         let total_rounds: i32 = trace.actions.len() as i32;
@@ -157,8 +157,7 @@ impl TrainableAgent for NeuralNetworkAgent {
         for action in &trace.actions {
             game.play(action.action);
 
-            // TODO(knielsen): Condition this check on that the move was made by this agent as well
-            //if !action.is_exploratory {
+            if !action.is_exploratory && game.get_current_player() != player {
                 let expect = expected(i.min(total_rounds - 1));
                 let game_config = NeuralNetworkAgent::to_nn_config(&game);
 
@@ -167,7 +166,7 @@ impl TrainableAgent for NeuralNetworkAgent {
 
                 // println!("Training \n{} to {}", game, expect);
                 self.momentums = Some(self.value_net.train(&game_config, &expect, alpha, beta, &self.momentums));
-            //}
+            }
             i += 1;
         }
 

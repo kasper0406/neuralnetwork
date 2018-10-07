@@ -261,8 +261,8 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
                         drop(guard);
                     }
 
-                    let train_agent = |agent: &mut NeuralNetworkAgent, trace: GameTrace| {
-                        agent.train(&trace, 0.8)
+                    let train_agent = |agent: &mut NeuralNetworkAgent, trace: GameTrace, player: Color| {
+                        agent.train(&trace, 0.8, player)
                     };
 
                     let mut agent1_error = None;
@@ -271,7 +271,7 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
 
                     if agent2.is_none() {
                         trace = thread_trainer.battle(&*agent1, &*agent1);
-                        agent1_error = Some(train_agent(&mut *agent1, trace.clone()));
+                        agent1_error = Some(train_agent(&mut *agent1, trace.clone(), Color::GREEN));
                     } else {
                         let mut agent1_ref = &mut *agent1;
                         let mut agent2_ref = &mut *agent2.unwrap();
@@ -281,10 +281,10 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
                             let trace_clone_1 = trace.clone();
                             let trace_clone_2 = trace.clone();
                             let agent1_trainer_thread = train_scope.spawn(move || {
-                                return train_agent(&mut agent1_ref, trace_clone_1)
+                                return train_agent(&mut agent1_ref, trace_clone_1, Color::GREEN)
                             });
                             let agent2_trainer_thread = train_scope.spawn(move || {
-                                return train_agent(&mut agent2_ref, trace_clone_2)
+                                return train_agent(&mut agent2_ref, trace_clone_2, Color::RED)
                             });
 
                             agent1_error = Some(agent1_trainer_thread.join().unwrap());
@@ -336,7 +336,7 @@ fn main() {
 
         loop {
             let trace = trainer.battle(&*agent0, &human_agent);
-            agent0.train(&trace, 0.8);
+            agent0.train(&trace, 0.8, Color::GREEN);
         }
     }
 
