@@ -8,9 +8,25 @@ use rand::distributions::Uniform;
 use std::iter::Iterator;
 use std::io;
 
+#[derive(Copy, Clone, Serialize, Deserialize)]
+pub enum GameDescription {
+    ThreeInARow,
+    FourInARow
+}
+
+impl GameDescription {
+    pub fn construct_game(game_description: GameDescription) -> KSuccession {
+        match game_description {
+            GameDescription::ThreeInARow => KSuccession::new(4, 5, 3),
+            GameDescription::FourInARow => KSuccession::new(6, 7, 4)
+        }
+    }
+}
+
+
 #[derive(Clone)]
 pub struct KSuccessionTrainer {
-    game_factory: fn () -> KSuccession,
+    game_description: GameDescription,
 }
 
 #[derive(Clone)]
@@ -49,20 +65,21 @@ pub trait TrainableAgent: Agent {
     fn train(&mut self, trace: &GameTrace, discount_factor: f64, player: Color) -> f64;
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct NeuralNetworkAgent {
     value_net: NeuralNetwork,
     momentums: Option<Vec<Matrix<f64>>>,
-    game_factory: fn () -> KSuccession,
+    game_description: GameDescription,
     exploration_rate: f64,
     verbose: bool
 }
 
 impl NeuralNetworkAgent {
-    pub fn new(game_factory: fn () -> KSuccession, value_net: NeuralNetwork, exploration_rate: f64) -> NeuralNetworkAgent {
+    pub fn new(game_description: GameDescription, value_net: NeuralNetwork, exploration_rate: f64) -> NeuralNetworkAgent {
         NeuralNetworkAgent {
             value_net: value_net,
             momentums: None,
-            game_factory: game_factory,
+            game_description: game_description,
             exploration_rate: exploration_rate,
             verbose: false
         }
@@ -125,7 +142,7 @@ impl TrainableAgent for NeuralNetworkAgent {
      * Train the neural network return the average state error
      */
     fn train(&mut self, trace: &GameTrace, discount_factor: f64, player: Color) -> f64 {
-        let mut game = (self.game_factory)();
+        let mut game = GameDescription::construct_game(self.game_description);
 
         let total_rounds: i32 = trace.actions.len() as i32;
         let expected = |round: i32| {
@@ -232,9 +249,9 @@ impl Agent for HumanAgent {
 }
 
 impl KSuccessionTrainer {
-    pub fn new(game_factory: fn () -> KSuccession) -> KSuccessionTrainer {
+    pub fn new(game_description: GameDescription) -> KSuccessionTrainer {
         KSuccessionTrainer {
-            game_factory: game_factory
+            game_description: game_description
         }
     }
 
@@ -246,7 +263,7 @@ impl KSuccessionTrainer {
     }
 
     pub fn battle(&self, agent1: &Agent, agent2: &Agent) -> GameTrace {
-        let mut game = (self.game_factory)();
+        let mut game = GameDescription::construct_game(self.game_description);
         let mut actions = Vec::with_capacity(game.get_rows() * game.get_columns());
         let mut winner = None;
 

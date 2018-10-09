@@ -6,6 +6,10 @@ extern crate rand;
 extern crate crossbeam;
 extern crate rayon;
 
+#[macro_use] extern crate serde_derive;
+extern crate serde;
+extern crate serde_json;
+
 mod matrix;
 use matrix::Matrix;
 use rand::distributions::{Normal, Distribution};
@@ -24,6 +28,8 @@ mod neuralnetwork;
 use neuralnetwork::NeuralNetwork;
 use neuralnetwork::LayerDescription;
 use neuralnetwork::DropoutType;
+use neuralnetwork::ActivationFunctionDescriptor;
+use neuralnetwork::Regulizer;
 
 use std::fs::File;
 use std::io::prelude::*;
@@ -40,7 +46,7 @@ mod ksuccession;
 use ksuccession::{ KSuccession, Color };
 
 mod ksuccessiontrainer;
-use ksuccessiontrainer::{ KSuccessionTrainer, Agent, TrainableAgent, HumanAgent, NeuralNetworkAgent, GameTrace };
+use ksuccessiontrainer::{ KSuccessionTrainer, Agent, TrainableAgent, HumanAgent, NeuralNetworkAgent, GameTrace, GameDescription };
 
 extern crate test;
 use test::Bencher;
@@ -90,54 +96,48 @@ fn load_kasper_samples() -> Vec<ImageSample> {
     return result;
 }
 
-fn construct_agent(game_factory: fn () -> KSuccession, layers: &[LayerDescription]) -> NeuralNetworkAgent {
-    let sample_game = game_factory();
+fn construct_agent(game_description: GameDescription, layers: &[LayerDescription]) -> NeuralNetworkAgent {
+    let sample_game = GameDescription::construct_game(game_description);
 
     let mut nn = NeuralNetwork::new(sample_game.get_rows() * sample_game.get_columns(), layers.to_vec());
     nn.set_dropout(DropoutType::Weight(0.10));
-    nn.set_regulizer(|weights: &Matrix<f64>| {
-        return Matrix::new(weights.rows(), weights.columns(), &|row, col| {
-            let lambda = 0.00003_f64;
-            return lambda * weights[(row, col)];
-        });
-    });
+    nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f64)));
 
-    NeuralNetworkAgent::new(game_factory, nn, 0.4)
+    NeuralNetworkAgent::new(game_description, nn, 0.4)
 }
 
-fn construct_agents(game_factory: fn () -> KSuccession) -> Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> {
+fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> {
     let twoplayerscore = &TwoPlayerScore;
 
     let layers = vec![
         LayerDescription {
             num_neurons: 100_usize,
-            function: twoplayerscore
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
         },
         LayerDescription {
             num_neurons: 160_usize,
-            function: twoplayerscore
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
         },
         LayerDescription {
             num_neurons: 80_usize,
-            function: twoplayerscore
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
         },
         LayerDescription {
             num_neurons: 50_usize,
-            function: twoplayerscore
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
         },
         LayerDescription {
             num_neurons: 1_usize,
-            function: twoplayerscore
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
         }
     ];
 
     let num_agents = 5;
     let mut agents: Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> = Vec::with_capacity(num_agents);
 
-    let sample_game = game_factory();
     for i in 0..num_agents {
         let layers_to_use = &layers[i..];
-        agents.push(UnsafeCell::new(Mutex::new(construct_agent(game_factory, layers_to_use))));
+        agents.push(UnsafeCell::new(Mutex::new(construct_agent(game_description, layers_to_use))));
     }
 
     return agents;
@@ -183,11 +183,11 @@ fn bench_agent_training(b: &mut Bencher) {
         let layers = vec![
             LayerDescription {
                 num_neurons: 200_usize,
-                function: twoplayerscore
+                function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
             },
             LayerDescription {
                 num_neurons: 1_usize,
-                function: twoplayerscore
+                function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
             }
         ];
         for i in 0..num_agents {
@@ -319,11 +319,18 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
 }
 
 fn main() {
-    let game_factory = || KSuccession::new(6, 7, 4);
-    // let game_factory = || KSuccession::new(4, 5, 3);
-    let trainer = KSuccessionTrainer::new(game_factory);
+    let game_description = GameDescription::FourInARow;
+    let trainer = KSuccessionTrainer::new(game_description);
+    let mut agents = construct_agents(game_description);
 
-    let mut agents = construct_agents(game_factory);
+    unsafe {
+        let serialized = serde_json::to_string(&(*(*agents[3].get()).lock().unwrap())).unwrap();
+        println!("{}", serialized);
+
+        let mut loaded_agent: NeuralNetworkAgent = serde_json::from_str(&serialized).unwrap();
+        loaded_agent.set_verbose(true);
+    }
+
     battle_agents(1000000, &trainer, &agents);
 
     unsafe {
@@ -402,28 +409,22 @@ fn main() {
         }, */
         LayerDescription {
             num_neurons: 50_usize,
-            function: sigmoid
+            function_descriptor: ActivationFunctionDescriptor::Sigmoid
         },
         LayerDescription {
             num_neurons: 25_usize,
-            function: sigmoid
+            function_descriptor: ActivationFunctionDescriptor::Sigmoid
         },
         LayerDescription {
             num_neurons: 10_usize,
-            function: sigmoid
+            function_descriptor: ActivationFunctionDescriptor::Sigmoid
         }
     ];
 
     let mut nn = NeuralNetwork::new(image_size, layers.clone());
     nn.set_dropout(DropoutType::Weight(0.10));
     // nn.set_dropout(DropoutType::Neuron(0.05));
-
-    nn.set_regulizer(|weights: &Matrix<f64>| {
-        return Matrix::new(weights.rows(), weights.columns(), &|row, col| {
-            let lambda = 0.00003_f64;
-            return lambda * weights[(row, col)];
-        });
-    });
+    nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f64)));
 
     let compute_avg_error = |network: &NeuralNetwork, samples: &[ImageSample]| {
         let total_error = samples.iter().fold(0_f64, |acc, sample| {

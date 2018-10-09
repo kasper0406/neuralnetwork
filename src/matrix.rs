@@ -8,7 +8,7 @@ use std::cmp;
 
 use rayon::prelude::*;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Matrix<T> {
     rows: usize,
     columns: usize,
