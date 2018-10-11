@@ -5,6 +5,7 @@ extern crate rand;
 // extern crate futures;
 extern crate crossbeam;
 extern crate rayon;
+extern crate num_cpus;
 
 #[macro_use] extern crate serde_derive;
 extern crate serde;
@@ -31,6 +32,7 @@ use neuralnetwork::DropoutType;
 use neuralnetwork::ActivationFunctionDescriptor;
 use neuralnetwork::Regulizer;
 
+use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -103,7 +105,7 @@ fn construct_agent(game_description: GameDescription, layers: &[LayerDescription
     nn.set_dropout(DropoutType::Weight(0.10));
     nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f64)));
 
-    NeuralNetworkAgent::new(game_description, nn, 0.4)
+    NeuralNetworkAgent::new(game_description, nn, 0.2)
 }
 
 fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> {
@@ -212,6 +214,7 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
 
     // TODO(knielsen): Figure out a way to save agent state
     let report_interval = 1000;
+    let snapshot_interval = 10000;
     let mut prev_agent_stats = agent_stats.clone();
     for i in 0..rounds {
         if i % report_interval == 0 {
@@ -228,6 +231,11 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
             println!("Winner stats (this interval)");
             println!("{}", &agent_stats - &prev_agent_stats);
             prev_agent_stats = agent_stats.clone();
+        }
+
+        if i % snapshot_interval == 0 {
+            println!("Snapshotting agents at {}", i);
+            serialize_agents(&agents);
         }
 
         let mut battle_threads = Vec::with_capacity(2 * agents.len());
@@ -318,19 +326,47 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
     }
 }
 
+fn serialize_agent(filename: &str, agent: &NeuralNetworkAgent) {
+    let data = serde_json::to_string(agent).expect(&format!("Failed to serialize nn-agent: {}", filename));
+    fs::write(filename, &data).expect(&format!("Failed to write nn-agent: {}", filename));
+}
+
+fn serialize_agents(agents: &[UnsafeCell<Mutex<NeuralNetworkAgent>>]) {
+    unsafe {
+        for (i, agent) in agents.iter().enumerate() {
+            let agent = &(*(*(agent.get())).lock().unwrap());
+            serialize_agent(&format!("agents/agent_{}.json", i), &agent);
+        }
+    }
+}
+
+fn deserialize_agent(filename: &str) -> NeuralNetworkAgent {
+    let data = fs::read_to_string(filename).expect(&format!("Failed to read nn-agent file: {}", filename));
+    serde_json::from_str(&data).expect(&format!("Failed to deserialize nn-agent: {}", filename))
+}
+
+fn initialize_rayon_thread_pool() {
+    let num_cpu_cores = num_cpus::get();
+
+    // The application seems to be a bit memory bound as well, so make a bunch of CPU threads
+    let num_threads = 2 * num_cpu_cores;
+
+    println!("Available logical CPU cores: {}", num_cpu_cores);
+    println!("Using {} threads", num_threads);
+    rayon::ThreadPoolBuilder::new().num_threads(num_threads).build_global().unwrap();
+}
+
 fn main() {
+    initialize_rayon_thread_pool();
+
     let game_description = GameDescription::FourInARow;
     let trainer = KSuccessionTrainer::new(game_description);
     let mut agents = construct_agents(game_description);
 
-    unsafe {
-        let serialized = serde_json::to_string(&(*(*agents[3].get()).lock().unwrap())).unwrap();
-        println!("{}", serialized);
+    println!("Loading saved agents...");
+    // agents.push(UnsafeCell::new(Mutex::new(deserialize_agent("best_agents/test_best.json"))));
 
-        let mut loaded_agent: NeuralNetworkAgent = serde_json::from_str(&serialized).unwrap();
-        loaded_agent.set_verbose(true);
-    }
-
+    println!("Battle agents...");
     battle_agents(1000000, &trainer, &agents);
 
     unsafe {
