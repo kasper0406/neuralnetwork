@@ -213,7 +213,7 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
     let mut agent_errors = Matrix::new(agents.len(), 1, &|_,_| 0_f64);
 
     // TODO(knielsen): Figure out a way to save agent state
-    let report_interval = 1000;
+    let report_interval = 10;
     let snapshot_interval = 10000;
     let mut prev_agent_stats = agent_stats.clone();
     for i in 0..rounds {
@@ -364,7 +364,7 @@ fn main() {
     let mut agents = construct_agents(game_description);
 
     println!("Loading saved agents...");
-    // agents.push(UnsafeCell::new(Mutex::new(deserialize_agent("best_agents/test_best.json"))));
+    agents.push(UnsafeCell::new(Mutex::new(deserialize_agent("best_agents/test_agent.json"))));
 
     println!("Battle agents...");
     battle_agents(1000000, &trainer, &agents);
