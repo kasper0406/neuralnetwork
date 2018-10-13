@@ -15,7 +15,7 @@ extern crate serde_json;
 mod matrix;
 use matrix::Matrix;
 use rand::distributions::{Normal, Distribution};
-use rand::{thread_rng, Rng};
+use rand::{thread_rng, Rng, RngCore};
 use std::ptr;
 use std::collections::HashMap;
 use std::cell::UnsafeCell;
@@ -276,26 +276,26 @@ fn bench_entrywise_product_test(b: &mut Bencher) {
 #[bench]
 fn bench_agent_training(b: &mut Bencher) {
     b.iter(|| {
-        let game_factory = || KSuccession::new(6, 7, 4);
+        let game_description = GameDescription::FourInARow;
         let twoplayerscore = &TwoPlayerScore;
 
         let num_agents = 4;
         let mut agents: Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> = Vec::with_capacity(num_agents);
         let layers = vec![
             LayerDescription {
-                num_neurons: 200_usize,
+                num_neurons: 50_usize,
                 function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
             },
-            LayerDescriptiohandle {
+            LayerDescription {
                 num_neurons: 1_usize,
                 function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
             }
         ];
         for i in 0..num_agents {
-            agents.push(UnsafeCell::new(Mutex::new(construct_agent(game_factory, &layers))));
+            agents.push(UnsafeCell::new(Mutex::new(construct_agent(game_description, &layers))));
         }
 
-        let trainer = KSuccessionTrainer::new(game_factory);
+        let trainer = KSuccessionTrainer::new(game_description);
         test::black_box(battle_agents(1, &trainer, &agents));
     });
 }
@@ -487,10 +487,85 @@ impl MatrixHandle {
         return handle;
     }
 
-    fn to_matrix(handle: MatrixHandle) -> Matrix<f32> {
+    fn to_matrix(handle: &MatrixHandle) -> Matrix<f32> {
         Matrix::new(handle.rows, handle.columns, &|row, column| {
             unsafe { *(handle.elements.offset((row * handle.columns + column) as isize)) }
         })
+    }
+
+    fn entrywise_product(&self, rhs: &MatrixHandle) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_entrywise_multiply(self as *const MatrixHandle,
+                                      rhs as *const MatrixHandle,
+                                      &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to entrywise-product matrices!");
+        }
+        return result_handle;
+    }
+
+    fn transpose(&self) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_transpose(self as *const MatrixHandle,
+                             &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to transpose matrices!");
+        }
+        return result_handle;
+    }
+
+    fn add_constant_row(&self, padding: f32) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_add_constant_row(padding,
+                                    self as *const MatrixHandle,
+                                    &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to transpose matrices!");
+        }
+        return result_handle;
+    }
+
+    // Kind of hacky, assumes no side effects. Fine for now, and it's fast!
+    fn remove_first_row(&self) -> MatrixHandle {
+        assert!(self.rows > 1, "Matrix must have > 1 row!");
+
+        MatrixHandle {
+            rows: self.rows - 1,
+            columns: self.columns,
+            elements: unsafe { self.elements.offset(self.columns as isize) }
+        }
+    }
+
+    fn dropout_elements(&self, rate: f32) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_dropout_elements(rate,
+                                    self as *const MatrixHandle,
+                                    &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to transpose matrices!");
+        }
+        return result_handle;
+    }
+
+    fn dropout_rows(&self, rate: f32) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_dropout_rows(rate,
+                                self as *const MatrixHandle,
+                                &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to transpose matrices!");
+        }
+        return result_handle;
     }
 }
 
@@ -502,15 +577,32 @@ impl Drop for MatrixHandle {
     }
 }
 
-impl Add for MatrixHandle {
+impl<'a> Add for &'a MatrixHandle {
     type Output = MatrixHandle;
 
-    fn add(self, other: MatrixHandle) -> MatrixHandle {
+    fn add(self, rhs: &MatrixHandle) -> MatrixHandle {
         let mut result_handle = MatrixHandle::empty();
         let add_result = unsafe {
-            matrix_add(&self as *const MatrixHandle,
-                       &other as *const MatrixHandle,
+            matrix_add(self as *const MatrixHandle,
+                       rhs as *const MatrixHandle,
                        &mut result_handle as *mut MatrixHandle)
+        };
+        if add_result != 0 {
+            panic!("Failed to add matrices!");
+        }
+        return result_handle;
+    }
+}
+
+impl<'a> Mul for &'a MatrixHandle {
+    type Output = MatrixHandle;
+
+    fn mul(self, rhs: &MatrixHandle) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let add_result = unsafe {
+            matrix_multiply(self as *const MatrixHandle,
+                            rhs as *const MatrixHandle,
+                            &mut result_handle as *mut MatrixHandle)
         };
         if add_result != 0 {
             panic!("Failed to add matrices!");
@@ -521,6 +613,7 @@ impl Add for MatrixHandle {
 
 #[link(name = "matrix", kind = "static")]
 extern {
+
     fn matrix_alloc(rows: libc::size_t,
                     columns: libc::size_t,
                     elements: *const libc::c_float,
@@ -531,20 +624,67 @@ extern {
     fn matrix_add(handle_a: *const MatrixHandle,
                   handle_b: *const MatrixHandle,
                   handle_result: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_entrywise_multiply(handle_a: *const MatrixHandle,
+                                 handle_b: *const MatrixHandle,
+                                 handle_result: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_multiply(handle_a: *const MatrixHandle,
+                       handle_b: *const MatrixHandle,
+                       handle_result: *mut MatrixHandle) -> libc::c_int;
+    
+    fn matrix_transpose(handle_a: *const MatrixHandle,
+                        handle_result: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_add_constant_row(padding: f32,
+                               handle_a: *const MatrixHandle,
+                               handle_result: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_dropout_elements(rate: f32,
+                               handle_a: *const MatrixHandle,
+                               handle_result: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_dropout_rows(rate: f32,
+                           handle_a: *const MatrixHandle,
+                           handle_result: *mut MatrixHandle) -> libc::c_int;
+}
+
+/*
+#[bench]
+fn matrix_operations_cpu(b: &mut Bencher) {
+    b.iter(|| {
+        let A = Matrix::new(1000, 1000, &|row, col| (row + 2 * col) as f32);
+        let B = Matrix::new(1000, 1000, &|row, col| (2 * row + col) as f32);
+
+        test::black_box(&(&A + &B).entrywise_product(&A) * &A);
+    });
+} */
+
+#[bench]
+fn matrix_operations_gpu(b: &mut Bencher) {
+    b.iter(|| {
+        let A = Matrix::new(1000, 1000, &|row, col| (row + 2 * col) as f32);
+        let B = Matrix::new(1000, 1000, &|row, col| (2 * row + col) as f32);
+
+        let handle_a = MatrixHandle::from_matrix(A);
+        let handle_b = MatrixHandle::from_matrix(B);
+
+        test::black_box(&(&handle_a + &handle_b).entrywise_product(&handle_a) * &handle_a);
+    });
 }
 
 fn main() {
 
-    let A = Matrix::new(10, 10, &|row, col| (row + 2 * col) as f32);
-    let B = Matrix::new(10, 10, &|row, col| (2 * row + col) as f32);
+    let A = Matrix::new(20, 10, &|row, col| (row + 2 * col) as f32);
+    let B = Matrix::new(10, 20, &|row, col| (2 * row + col) as f32);
 
-    println!("{}", &A + &B);
+    println!("{}", A.add_constant_row(9_f32).remove_first_row().dropout_rows(0.7));
 
     let handle_a = MatrixHandle::from_matrix(A);
     let handle_b = MatrixHandle::from_matrix(B);
 
-    let result = handle_a + handle_b;
-    println!("{}", MatrixHandle::to_matrix(result));
+    let result = handle_a.add_constant_row(9_f32).remove_first_row().dropout_rows(0.7);
+    println!("{}", MatrixHandle::to_matrix(&result));
 
     return;
 
