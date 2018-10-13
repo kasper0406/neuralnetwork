@@ -15,8 +15,8 @@ pub struct Matrix<T> {
     values: Vec<T>
 }
 
-impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + Sync + AddAssign + Add<Output=T>> Matrix<T> {
-    pub fn new<F: Fn(usize, usize) -> T + Sync>(rows: usize, columns: usize, populator: &F) -> Matrix<T> {
+impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + AddAssign + Add<Output=T>> Matrix<T> {
+    pub fn new<F: Fn(usize, usize) -> T>(rows: usize, columns: usize, populator: &F) -> Matrix<T> {
         assert!(rows > 0, "A matrix must have >0 rows");
         assert!(columns > 0, "A matrix must have >0 columns");
 
@@ -28,6 +28,10 @@ impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + Sync + AddAssign + Ad
         }
 
         Matrix { rows: rows, columns: columns, values: values }
+    }
+
+    pub fn raw_values(&self) -> &Vec<T> {
+        return &self.values;
     }
 
     pub fn slow_mul(self, rhs: &Matrix<T>) -> Matrix<T> {

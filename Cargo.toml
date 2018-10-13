@@ -3,6 +3,8 @@ name = "digits"
 version = "0.1.0"
 authors = ["Kasper Nielsen <kasper0406@gmail.com>"]
 
+build = "build.rs"
+
 [dependencies]
 num = "*"
 rand = "*"
@@ -14,3 +16,5 @@ num_cpus = "1.8.0"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
+
+libc = "0.2.0"

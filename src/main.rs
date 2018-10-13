@@ -6,6 +6,7 @@ extern crate rand;
 extern crate crossbeam;
 extern crate rayon;
 extern crate num_cpus;
+extern crate libc;
 
 #[macro_use] extern crate serde_derive;
 extern crate serde;
@@ -52,6 +53,8 @@ use ksuccessiontrainer::{ KSuccessionTrainer, Agent, TrainableAgent, HumanAgent,
 
 extern crate test;
 use test::Bencher;
+
+use std::ops::{Add, AddAssign, Sub, Mul, Index, IndexMut};
 
 struct ImageSample {
     values: Matrix<f64>,
@@ -108,14 +111,107 @@ fn construct_agent(game_description: GameDescription, layers: &[LayerDescription
     NeuralNetworkAgent::new(game_description, nn, 0.2)
 }
 
-fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> {
-    let twoplayerscore = &TwoPlayerScore;
-
+fn construct_deep_agent(game_description: GameDescription) -> NeuralNetworkAgent {
     let layers = vec![
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 80_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 1_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        }
+    ];
+
+    construct_agent(game_description, &layers)
+}
+
+fn construct_wide_agent(game_description: GameDescription) -> NeuralNetworkAgent {
+    let layers = vec![
+        LayerDescription {
+            num_neurons: 300_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 300_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 300_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 300_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 300_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        },
+        LayerDescription {
+            num_neurons: 1_usize,
+            function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
+        }
+    ];
+
+    construct_agent(game_description, &layers)
+}
+
+fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> {
+    let layers = vec![
+        /*
         LayerDescription {
             num_neurons: 100_usize,
             function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
-        },
+        },*/
         LayerDescription {
             num_neurons: 160_usize,
             function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
@@ -134,13 +230,16 @@ fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<N
         }
     ];
 
-    let num_agents = 5;
-    let mut agents: Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> = Vec::with_capacity(num_agents);
+    let num_agents = 4;
+    let mut agents: Vec<UnsafeCell<Mutex<NeuralNetworkAgent>>> = Vec::with_capacity(num_agents + 2);
 
     for i in 0..num_agents {
         let layers_to_use = &layers[i..];
         agents.push(UnsafeCell::new(Mutex::new(construct_agent(game_description, layers_to_use))));
     }
+
+    // agents.push(UnsafeCell::new(Mutex::new(construct_deep_agent(game_description))));
+    // agents.push(UnsafeCell::new(Mutex::new(construct_wide_agent(game_description))));
 
     return agents;
 }
@@ -187,7 +286,7 @@ fn bench_agent_training(b: &mut Bencher) {
                 num_neurons: 200_usize,
                 function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
             },
-            LayerDescription {
+            LayerDescriptiohandle {
                 num_neurons: 1_usize,
                 function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
             }
@@ -213,8 +312,8 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
     let mut agent_errors = Matrix::new(agents.len(), 1, &|_,_| 0_f64);
 
     // TODO(knielsen): Figure out a way to save agent state
-    let report_interval = 10;
-    let snapshot_interval = 10000;
+    let report_interval = 100;
+    let snapshot_interval = 2500;
     let mut prev_agent_stats = agent_stats.clone();
     for i in 0..rounds {
         if i % report_interval == 0 {
@@ -349,14 +448,106 @@ fn initialize_rayon_thread_pool() {
     let num_cpu_cores = num_cpus::get();
 
     // The application seems to be a bit memory bound as well, so make a bunch of CPU threads
-    let num_threads = 2 * num_cpu_cores;
+    let num_threads = 4 * num_cpu_cores;
 
     println!("Available logical CPU cores: {}", num_cpu_cores);
     println!("Using {} threads", num_threads);
     rayon::ThreadPoolBuilder::new().num_threads(num_threads).build_global().unwrap();
 }
 
+#[repr(C)]
+struct MatrixHandle {
+    rows: usize,
+    columns: usize,
+    elements: *const f32
+}
+
+impl MatrixHandle {
+    fn empty() -> MatrixHandle {
+        MatrixHandle {
+            rows: 0,
+            columns: 0,
+            elements: ptr::null()
+        }
+    }
+
+    fn from_matrix(matrix: Matrix<f32>) -> MatrixHandle {
+        let mut handle: MatrixHandle = MatrixHandle::empty();
+
+        let alloc_result = unsafe {
+            matrix_alloc(matrix.rows(),
+                         matrix.columns(),
+                         matrix.raw_values().as_ptr(),
+                         &mut handle as *mut MatrixHandle)
+        };
+        if alloc_result != 0 {
+            panic!("Failed to create MatrixHandle");
+        }
+
+        return handle;
+    }
+
+    fn to_matrix(handle: MatrixHandle) -> Matrix<f32> {
+        Matrix::new(handle.rows, handle.columns, &|row, column| {
+            unsafe { *(handle.elements.offset((row * handle.columns + column) as isize)) }
+        })
+    }
+}
+
+impl Drop for MatrixHandle {
+    fn drop(&mut self) {
+        if self.elements != ptr::null() {
+            unsafe { matrix_free(self as *mut MatrixHandle) };
+        }
+    }
+}
+
+impl Add for MatrixHandle {
+    type Output = MatrixHandle;
+
+    fn add(self, other: MatrixHandle) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let add_result = unsafe {
+            matrix_add(&self as *const MatrixHandle,
+                       &other as *const MatrixHandle,
+                       &mut result_handle as *mut MatrixHandle)
+        };
+        if add_result != 0 {
+            panic!("Failed to add matrices!");
+        }
+        return result_handle;
+    }
+}
+
+#[link(name = "matrix", kind = "static")]
+extern {
+    fn matrix_alloc(rows: libc::size_t,
+                    columns: libc::size_t,
+                    elements: *const libc::c_float,
+                    handle: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_free(handle: *mut MatrixHandle);
+
+    fn matrix_add(handle_a: *const MatrixHandle,
+                  handle_b: *const MatrixHandle,
+                  handle_result: *mut MatrixHandle) -> libc::c_int;
+}
+
 fn main() {
+
+    let A = Matrix::new(10, 10, &|row, col| (row + 2 * col) as f32);
+    let B = Matrix::new(10, 10, &|row, col| (2 * row + col) as f32);
+
+    println!("{}", &A + &B);
+
+    let handle_a = MatrixHandle::from_matrix(A);
+    let handle_b = MatrixHandle::from_matrix(B);
+
+    let result = handle_a + handle_b;
+    println!("{}", MatrixHandle::to_matrix(result));
+
+    return;
+
     initialize_rayon_thread_pool();
 
     let game_description = GameDescription::FourInARow;
