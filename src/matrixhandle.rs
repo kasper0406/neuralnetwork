@@ -24,6 +24,9 @@ extern {
 
     fn matrix_free(handle: *mut MatrixHandle);
 
+    fn matrix_device_to_host(handle: *const MatrixHandle,
+                             host_elements: *mut libc::c_float) -> libc::c_int;
+
     fn matrix_add(handle_a: *const MatrixHandle,
                   handle_b: *const MatrixHandle,
                   handle_result: *mut MatrixHandle) -> libc::c_int;
@@ -102,9 +105,19 @@ impl MatrixHandle {
 
     pub fn to_matrix(handle: &MatrixHandle) -> Matrix<f32> {
         MatrixHandle::synchronize(true);
-        Matrix::new(handle.rows, handle.columns, &|row, column| {
-            unsafe { *(handle.elements.offset((row * handle.columns + column) as isize)) }
-        })
+
+        let mut elements = vec![0_f32; handle.rows * handle.columns];
+        let device_to_host_result = unsafe {
+            matrix_device_to_host(handle as *const MatrixHandle,
+                                  elements.as_mut_ptr())
+        };
+        if device_to_host_result != 0 {
+            panic!("Failed to transfer device memory to host!");
+        }
+
+        return Matrix::new(handle.rows, handle.columns, &|row, column| {
+            elements[row * handle.columns + column]
+        });
     }
 
     pub fn rows(&self) -> usize {
