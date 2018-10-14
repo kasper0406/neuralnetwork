@@ -11,6 +11,9 @@ extern crate libc;
 #[macro_use] extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
+extern crate bincode;
+
+use bincode::{serialize, deserialize};
 
 mod matrix;
 use matrix::Matrix;
@@ -277,9 +280,9 @@ fn battle_agents(batches: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeC
     let mut agent_errors = Matrix::new(agents.len(), 1, &|_,_| 0_f64);
 
     // TODO(knielsen): Figure out a way to save agent state
-    let rounds_per_batch = 20;
+    let rounds_per_batch = 5;
     let report_interval = 100;
-    let snapshot_interval = 2500;
+    let snapshot_interval = 5000;
     let mut prev_agent_stats = agent_stats.clone();
     for i in 0..batches {
         if i % report_interval == 0 {
@@ -298,7 +301,7 @@ fn battle_agents(batches: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeC
             prev_agent_stats = agent_stats.clone();
         }
 
-        if i % snapshot_interval == 0 {
+        if i != 0 && i % snapshot_interval == 0 {
             println!("Snapshotting agents at {}", i);
             serialize_agents(&agents);
         }
@@ -307,49 +310,51 @@ fn battle_agents(batches: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeC
         let mut battle_stats_per_agent = vec![Vec::with_capacity(rounds_per_batch * 2); agents.len()];
 
         crossbeam::scope(|battle_scope| {
-            thread_rng().shuffle(&mut agent_battle_indexer);
+            for round in 0 .. rounds_per_batch {
+                thread_rng().shuffle(&mut agent_battle_indexer);
 
-            for (agent1_index_tmp, agent2_index_tmp) in agent_battle_indexer.iter().zip(0..agents.len()) {
-                let agent1_index = (*agent1_index_tmp).clone();
-                let agent2_index = agent2_index_tmp.clone();
+                for (agent1_index_tmp, agent2_index_tmp) in agent_battle_indexer.iter().zip(0..agents.len()) {
+                    let agent1_index = (*agent1_index_tmp).clone();
+                    let agent2_index = agent2_index_tmp.clone();
 
-                let thread_trainer = trainer.clone();
+                    let thread_trainer = trainer.clone();
 
-                let mut agent1_mutex;
-                let mut agent2_mutex;
-                unsafe {
-                    agent1_mutex = &mut *agents[agent1_index].get();
-                    agent2_mutex = &mut *agents[agent2_index].get();
-                }
-
-                let lock_acqure_mutex_clone = lock_acquire_mutex.clone();
-                battle_threads.push(battle_scope.spawn(move || {
-                    let mut agent1;
-                    let mut agent2 = None;
-                    {
-                        let guard = lock_acqure_mutex_clone.lock().unwrap();
-                        agent1 = agent1_mutex.lock().unwrap();
-                        if agent1_index != agent2_index {
-                            agent2 = Some(agent2_mutex.lock().unwrap());
-                        }
-                        drop(guard);
+                    let mut agent1_mutex;
+                    let mut agent2_mutex;
+                    unsafe {
+                        agent1_mutex = &mut *agents[agent1_index].get();
+                        agent2_mutex = &mut *agents[agent2_index].get();
                     }
 
-                    let trace = match agent2 {
-                        None => thread_trainer.battle(&*agent1, &*agent1),
-                        Some(mut actual_agent2) => {
-                            let mut agent1_ref = &mut *agent1;
-                            let mut agent2_ref = &mut *actual_agent2;
-                            thread_trainer.battle(agent1_ref, agent2_ref)
+                    let lock_acqure_mutex_clone = lock_acquire_mutex.clone();
+                    battle_threads.push(battle_scope.spawn(move || {
+                        let mut agent1;
+                        let mut agent2 = None;
+                        {
+                            let guard = lock_acqure_mutex_clone.lock().unwrap();
+                            agent1 = agent1_mutex.lock().unwrap();
+                            if agent1_index != agent2_index {
+                                agent2 = Some(agent2_mutex.lock().unwrap());
+                            }
+                            drop(guard);
                         }
-                    };
 
-                    return BattleStats {
-                        agent1_index: agent1_index,
-                        agent2_index: agent2_index,
-                        trace: trace
-                    };
-                }));
+                        let trace = match agent2 {
+                            None => thread_trainer.battle(&*agent1, &*agent1),
+                            Some(mut actual_agent2) => {
+                                let mut agent1_ref = &mut *agent1;
+                                let mut agent2_ref = &mut *actual_agent2;
+                                thread_trainer.battle(agent1_ref, agent2_ref)
+                            }
+                        };
+
+                        return BattleStats {
+                            agent1_index: agent1_index,
+                            agent2_index: agent2_index,
+                            trace: trace
+                        };
+                    }));
+                }
             }
 
             for battle_thread in battle_threads {
@@ -393,7 +398,8 @@ fn battle_agents(batches: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeC
 }
 
 fn serialize_agent(filename: &str, agent: &NeuralNetworkAgent) {
-    let data = serde_json::to_string(agent).expect(&format!("Failed to serialize nn-agent: {}", filename));
+    // let data = serde_json::to_string(agent).expect(&format!("Failed to serialize nn-agent: {}", filename));
+    let data = bincode::serialize(&agent).unwrap();
     fs::write(filename, &data).expect(&format!("Failed to write nn-agent: {}", filename));
 }
 
@@ -401,14 +407,17 @@ fn serialize_agents(agents: &[UnsafeCell<Mutex<NeuralNetworkAgent>>]) {
     unsafe {
         for (i, agent) in agents.iter().enumerate() {
             let agent = &(*(*(agent.get())).lock().unwrap());
-            serialize_agent(&format!("agents/agent_{}.json", i), &agent);
+            serialize_agent(&format!("agents/agent_{}.bin", i), &agent);
         }
     }
 }
 
 fn deserialize_agent(filename: &str) -> NeuralNetworkAgent {
-    let data = fs::read_to_string(filename).expect(&format!("Failed to read nn-agent file: {}", filename));
-    serde_json::from_str(&data).expect(&format!("Failed to deserialize nn-agent: {}", filename))
+    // let data = fs::read_to_string(filename).expect(&format!("Failed to read nn-agent file: {}", filename));
+    // serde_json::from_str(&data).expect(&format!("Failed to deserialize nn-agent: {}", filename))
+    let mut data = Vec::new();
+    File::open(filename).expect(&format!("Failed to read nn-agent file: {}", filename)).read_to_end(&mut data);
+    bincode::deserialize(&data).unwrap()
 }
 
 fn initialize_rayon_thread_pool() {
@@ -458,7 +467,7 @@ fn main() {
     // agents.push(UnsafeCell::new(Mutex::new(deserialize_agent("best_agents/test_agent.json"))));
 
     println!("Battle agents...");
-    battle_agents(250, &trainer, &agents);
+    battle_agents(50, &trainer, &agents);
 
     /*
     unsafe {

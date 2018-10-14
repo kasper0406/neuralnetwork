@@ -7,7 +7,8 @@ use std::ptr;
 pub struct MatrixHandle {
     rows: usize,
     columns: usize,
-    elements: *const f32
+    elements: *const f32,
+    allocated_bytes: usize
 }
 
 unsafe impl Send for MatrixHandle { }
@@ -21,6 +22,9 @@ extern {
                     columns: libc::size_t,
                     elements: *const libc::c_float,
                     handle: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_alloc_or_reuse(handle: *mut MatrixHandle,
+                                rows: libc::size_t, columns: libc::size_t) -> libc::c_int;
 
     fn matrix_free(handle: *mut MatrixHandle);
 
@@ -74,7 +78,15 @@ impl MatrixHandle {
         MatrixHandle {
             rows: 0,
             columns: 0,
-            elements: ptr::null()
+            elements: ptr::null(),
+            allocated_bytes: 0
+        }
+    }
+
+    pub fn copy(destination: &mut MatrixHandle, source: &MatrixHandle) {
+        let copy_result = unsafe { matrix_copy(source, destination) };
+        if copy_result != 0 {
+            panic!("Failed to copy matrices!");
         }
     }
 
@@ -118,6 +130,28 @@ impl MatrixHandle {
         return Matrix::new(handle.rows, handle.columns, &|row, column| {
             elements[row * handle.columns + column]
         });
+    }
+
+    pub fn of_size(rows: usize, columns: usize) -> MatrixHandle {
+        let mut handle = MatrixHandle::empty();
+        let alloc_res = unsafe {
+            matrix_alloc_or_reuse(&mut handle as *mut MatrixHandle, rows, columns)
+        };
+        if alloc_res != 0 {
+            panic!("Failed to allocate empty matrix!");
+        }
+        return handle;
+    }
+
+    pub fn multiply(dst: &mut MatrixHandle, A: &MatrixHandle, B: &MatrixHandle) {
+        let multiply_res = unsafe {
+            matrix_multiply(A as *const MatrixHandle,
+                            B as *const MatrixHandle,
+                            dst as *mut MatrixHandle)
+        };
+        if multiply_res != 0 {
+            panic!("Failed to multiply matrices: {}", multiply_res);
+        }
     }
 
     pub fn rows(&self) -> usize {
@@ -173,7 +207,8 @@ impl MatrixHandle {
         MatrixHandle {
             rows: self.rows - 1,
             columns: self.columns,
-            elements: unsafe { self.elements.offset(self.columns as isize) }
+            elements: unsafe { self.elements.offset(self.columns as isize) },
+            allocated_bytes: self.allocated_bytes
         }
     }
 

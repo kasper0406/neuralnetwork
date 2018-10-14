@@ -35,11 +35,19 @@ pub enum Regulizer {
     WeightPeanalizer(f32)
 }
 
+const MAX_INPUT_COLUMNS: usize = 10000;
+
 #[derive(Serialize, Deserialize)]
 pub struct NeuralNetwork {
     layers: Vec<Layer>,
     dropout: DropoutType,
-    regulizer: Option<Regulizer>
+    regulizer: Option<Regulizer>,
+
+    // TODO(knielsen): Figure out a way not to serialize/deserialize these
+    // #[serde(skip_serializing, skip_deserializing)]
+    _predictions: Vec<MatrixHandle>,
+    // #[serde(skip_serializing, skip_deserializing)]
+    _deltas: Vec<MatrixHandle>
 }
 
 #[derive(Clone, Copy)]
@@ -53,7 +61,7 @@ impl NeuralNetwork {
         let weight_distribution = Normal::new(0_f64, 1_f64);
 
         let mut prev_layer_neurons = input_degree;
-        let layers = layers.iter().map(|layer| {
+        let layers: Vec<Layer> = layers.iter().map(|layer| {
             let network_layer = Layer {
                 function_descriptor: layer.function_descriptor,
                 weights: MatrixHandle::from_matrix(
@@ -67,10 +75,23 @@ impl NeuralNetwork {
             return network_layer;
         }).collect();
 
+        // Allocate internal scratchpad matrices
+        let mut _predictions = Vec::with_capacity(layers.len() + 1);
+        _predictions.push(MatrixHandle::of_size(layers[0].weights.columns(), MAX_INPUT_COLUMNS));
+
+        let mut _deltas = Vec::with_capacity(layers.len());
+        for i in 0 .. layers.len() {
+            _predictions.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
+            _deltas.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
+        }
+
         return NeuralNetwork {
             layers: layers,
             dropout: DropoutType::None,
-            regulizer: None
+            regulizer: None,
+
+            _predictions: _predictions,
+            _deltas: _deltas
         }
     }
 
@@ -134,22 +155,31 @@ impl NeuralNetwork {
     }
 
     pub fn train(&mut self, input: &MatrixHandle, expected: &MatrixHandle, alpha: f32, beta: f32, momentums: &Option<Vec<MatrixHandle>>) -> Vec<MatrixHandle> {
+        if input.columns() > MAX_INPUT_COLUMNS {
+            // TODO(knielsen): Split the inputs such that memory on the GPU can be allocated up front
+            panic!("Splitting not yet implemented!");
+        } else {
+            return self.internal_train(input, expected, alpha, beta, momentums);
+        }
+    }
+
+    fn internal_train(&mut self, input: &MatrixHandle, expected: &MatrixHandle, alpha: f32, beta: f32, momentums: &Option<Vec<MatrixHandle>>) -> Vec<MatrixHandle> {
         let weights_with_dropout = self.compute_weights_with_dropouts();
-        let (predictions, deltas) = self.predict_for_training(input, &weights_with_dropout);
-        let prediction = predictions.last().unwrap();
+        self.predict_for_training(input, &weights_with_dropout);
+        let prediction = self._predictions.last().unwrap();
 
         let num_layers = self.layers.len();
         let mut gradients = Vec::with_capacity(num_layers);
 
-        let mut chain = (prediction - expected).entrywise_product(deltas.last().unwrap());
+        let mut chain = (prediction - expected).entrywise_product(self._deltas.last().unwrap());
         for (i, dropout_weights) in weights_with_dropout.iter().rev().enumerate() {
-            let mut gradient = &chain * &predictions[num_layers - i - 1].add_constant_row(1_f32).transpose();
+            let mut gradient = &chain * &self._predictions[num_layers - i - 1].add_constant_row(1_f32).transpose();
             if self.regulizer.is_some() {
                 gradient += self.get_regulizer_penalty(&dropout_weights);
             }
 
             if i < num_layers - 1 {
-                chain = (&dropout_weights.transpose().remove_first_row() * &chain).entrywise_product(&deltas[num_layers - 2 - i]);
+                chain = (&dropout_weights.transpose().remove_first_row() * &chain).entrywise_product(&self._deltas[num_layers - 2 - i]);
             }
 
             gradients.push(gradient);
@@ -184,21 +214,19 @@ impl NeuralNetwork {
         }
     }
 
-    fn predict_for_training(&self, input: &MatrixHandle, weights_with_dropout: &Vec<MatrixHandle>) -> (Vec<MatrixHandle>, Vec<MatrixHandle>) {
-        let mut results = Vec::with_capacity(self.layers.len() + 1);
-        results.push(input.clone());
+    fn predict_for_training(&mut self, input: &MatrixHandle, weights_with_dropout: &Vec<MatrixHandle>) {
+        MatrixHandle::copy(&mut self._predictions[0], input);
 
-        let mut deltas = Vec::with_capacity(self.layers.len());
-        let layers_with_dropout: Vec<_> = self.layers.iter().zip(weights_with_dropout.iter()).collect();
-        for (layer, dropout_weights) in layers_with_dropout {
+        let layers_with_dropout = self.layers.iter().zip(weights_with_dropout.iter()).enumerate();
+        for (i, (layer, dropout_weights)) in layers_with_dropout {
             let layer_function = self.get_activation_function(layer);
-            let last_result_with_bias = results.last().unwrap().add_constant_row(1_f32);
+            let last_result_with_bias = self._predictions[i].add_constant_row(1_f32);
             
-            let eval = dropout_weights * &last_result_with_bias;
-            results.push(layer_function.evaluate(&eval));
-            deltas.push(layer_function.derivative(&eval));
-        }
+            MatrixHandle::multiply(&mut self._predictions[i + 1], dropout_weights, &last_result_with_bias);
+            MatrixHandle::copy(&mut self._deltas[i], &self._predictions[i + 1]);
 
-        return (results, deltas);
+            layer_function.inline_evaluate(&mut self._predictions[i + 1]);
+            layer_function.inline_derivative(&mut self._deltas[i]);
+        }
     }
 }
