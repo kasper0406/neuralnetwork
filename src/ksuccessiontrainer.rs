@@ -64,7 +64,7 @@ pub trait Agent {
 }
 
 pub trait TrainableAgent: Agent {
-    fn train(&mut self, trace: &GameTrace, discount_factor: f64, player: Color) -> f64;
+    fn train(&mut self, traces: &[(Color, GameTrace)], discount_factor: f64) -> f64;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -158,58 +158,48 @@ impl TrainableAgent for NeuralNetworkAgent {
     /**
      * Train the neural network return the average state error
      */
-    fn train(&mut self, trace: &GameTrace, discount_factor: f64, player: Color) -> f64 {
-        let mut game = GameDescription::construct_game(self.game_description);
+    fn train(&mut self, traces: &[(Color, GameTrace)], discount_factor: f64) -> f64 {
 
-        let total_rounds: i32 = trace.actions.len() as i32;
-        let expected = |round: i32| {
-            MatrixHandle::from_matrix(
-                Matrix::new(1, 1, &|row, col| {
-                    match trace.winner {
-                        None => 0_f32,
-                        Some(player) => {
-                            let factor = discount_factor.powi(total_rounds - 1 - round) as f32;
-                            KSuccessionTrainer::player_value(player) * factor
-                        }
-                    }
-                })
-            )
+        let expected = |trace: &GameTrace, round: i32| -> f32 {
+            match trace.winner {
+                None => 0_f32,
+                Some(player) => {
+                    let factor = discount_factor.powi(trace.actions.len() as i32 - 1 - round) as f32;
+                    KSuccessionTrainer::player_value(player) * factor
+                }
+            }
         };
+
+        let total_len = traces.iter().map(|(_, trace)| trace.actions.len() + 1).sum();
+        let mut games = Vec::with_capacity(total_len);
+        let mut expectations = Vec::with_capacity(total_len);
+
+        for (player, trace) in traces {
+            let mut game = GameDescription::construct_game(self.game_description);
+            let total_rounds: i32 = trace.actions.len() as i32;
+
+            // TODO(knielsen): Figure out how to combine this into one vector
+            games.push(game.clone());
+            expectations.push(expected(trace, 0));
+
+            for (i, action) in trace.actions.iter().enumerate() {
+                game.play(action.action);
+                if !action.is_exploratory && game.get_current_player() != *player {
+                    let expect = expected(trace, i.min(trace.actions.len() - 1) as i32);
+                    games.push(game.clone());
+                    expectations.push(expect);
+                }
+            }
+        }
+
+        let game_configs = NeuralNetworkAgent::to_nn_config(&games);
+        let expect = MatrixHandle::from_matrix(Matrix::new(1, expectations.len(), &|_, col| expectations[col]));
 
         let alpha = 0.002_f32;
         let beta = 0.90_f32;
+        self.momentums = Some(self.value_net.train(&game_configs, &expect, alpha, beta, &self.momentums));
 
-        let mut error = 0_f32;
-        let mut error_terms = 0;
-
-        {
-            let expect = expected(0);
-            let game_config = NeuralNetworkAgent::to_nn_config(slice::from_ref(&game));
-
-            error += self.value_net.error(&game_config, &expect);
-            error_terms += 1;
-
-            self.momentums = Some(self.value_net.train(&game_config, &expect, alpha, beta, &self.momentums));
-        }
-
-        let mut i = 1;
-        for action in &trace.actions {
-            game.play(action.action);
-
-            if !action.is_exploratory && game.get_current_player() != player {
-                let expect = expected(i.min(total_rounds - 1));
-                let game_config = NeuralNetworkAgent::to_nn_config(slice::from_ref(&game));
-
-                error += self.value_net.error(&game_config, &expect);
-                error_terms += 1;
-
-                // println!("Training \n{} to {}", game, expect);
-                self.momentums = Some(self.value_net.train(&game_config, &expect, alpha, beta, &self.momentums));
-            }
-            i += 1;
-        }
-
-        return (error as f64) / (error_terms as f64);
+        return self.value_net.error(&game_configs, &expect) as f64;
     }
 }
 

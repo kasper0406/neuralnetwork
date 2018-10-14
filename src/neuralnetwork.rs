@@ -90,23 +90,23 @@ impl NeuralNetwork {
     }
 
     pub fn error(&self, input: &MatrixHandle, expected: &MatrixHandle) -> f32 {
-        assert!(expected.columns() == 1, "Expected exactly on column in expectation");
-
         let prediction = self.predict(input);
         return self.error_from_prediction(expected, &prediction);
     }
 
     pub fn error_from_prediction(&self, expected: &MatrixHandle, prediction: &MatrixHandle) -> f32 {
-        assert!(prediction.columns() == 1, "Expected exactly on column in prediction");
-        assert!(expected.rows() == prediction.rows(), "Expected and prediction should have same length!");
+        assert!(expected.rows() == prediction.rows(), "Expected and prediction should have same number of rows");
+        assert!(expected.columns() == prediction.columns(), "Expected and prediction should have same number of columns");
 
         // TODO(knielsen): Consider implementing this on the GPU
         let errors = MatrixHandle::to_matrix(&(expected - prediction));
-        let mut error = 0_f32;
-        for i in 0 .. expected.rows() {
-            error += errors[(i, 0)];
+        let mut error = 0_f64;
+        for col in 0 .. expected.columns() {
+            for row in 0 .. expected.rows() {
+                error += errors[(row, col)].powi(2) as f64;
+            }
         }
-        return error;
+        return (error / expected.columns() as f64) as f32;
     }
 
     fn compute_weights_with_dropouts(&self) -> Vec<MatrixHandle> {

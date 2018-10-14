@@ -252,7 +252,7 @@ impl<'a> Sub for &'a MatrixHandle {
                        &mut result_handle as *mut MatrixHandle)
         };
         if add_result != 0 {
-            panic!("Failed to add matrices!");
+            panic!("Failed to subtract matrices!");
         }
         return result_handle;
     }
@@ -269,7 +269,7 @@ impl<'a> Mul for &'a MatrixHandle {
                             &mut result_handle as *mut MatrixHandle)
         };
         if add_result != 0 {
-            panic!("Failed to add matrices!");
+            panic!("Failed to multiply matrices!");
         }
         return result_handle;
     }
@@ -286,7 +286,7 @@ impl<'a> Mul<f32> for &'a MatrixHandle {
                                    &mut result_handle as *mut MatrixHandle)
         };
         if add_result != 0 {
-            panic!("Failed to add matrices!");
+            panic!("Failed to scalar multiply matrices!");
         }
         return result_handle;
     }

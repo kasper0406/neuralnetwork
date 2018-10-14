@@ -39,6 +39,7 @@ use neuralnetwork::Regulizer;
 use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
+use std::slice;
 
 // use futures::executor::ThreadPool;
 // use futures::prelude::*;
@@ -57,11 +58,10 @@ use ksuccessiontrainer::{ KSuccessionTrainer, Agent, TrainableAgent, HumanAgent,
 extern crate test;
 use test::Bencher;
 
+#[derive(Clone)]
 struct BattleStats {
     agent1_index: usize,
-    agent1_error: Option<f64>,
     agent2_index: usize,
-    agent2_error: Option<f64>,
     trace: GameTrace
 }
 
@@ -69,7 +69,8 @@ fn construct_agent(game_description: GameDescription, layers: &[LayerDescription
     let sample_game = GameDescription::construct_game(game_description);
 
     let mut nn = NeuralNetwork::new(sample_game.get_rows() * sample_game.get_columns(), layers.to_vec());
-    nn.set_dropout(DropoutType::Weight(0.10));
+    // nn.set_dropout(DropoutType::Weight(0.10));
+    nn.set_dropout(DropoutType::None);
     nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f32)));
 
     NeuralNetworkAgent::new(game_description, nn, 0.2)
@@ -264,7 +265,7 @@ fn bench_agent_training(b: &mut Bencher) {
     });
 }
 
-fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCell<Mutex<NeuralNetworkAgent>>]) {
+fn battle_agents(batches: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCell<Mutex<NeuralNetworkAgent>>]) {
     let lock_acquire_mutex = Arc::new(Mutex::new(0));
 
     let mut agent_battle_indexer: Vec<usize> = Vec::with_capacity(agents.len());
@@ -276,10 +277,11 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
     let mut agent_errors = Matrix::new(agents.len(), 1, &|_,_| 0_f64);
 
     // TODO(knielsen): Figure out a way to save agent state
+    let rounds_per_batch = 20;
     let report_interval = 100;
     let snapshot_interval = 2500;
     let mut prev_agent_stats = agent_stats.clone();
-    for i in 0..rounds {
+    for i in 0..batches {
         if i % report_interval == 0 {
             println!("Playing game nr. {}", i);
             for agent_index in 0..agents.len() {
@@ -301,11 +303,12 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
             serialize_agents(&agents);
         }
 
-        let mut battle_threads = Vec::with_capacity(2 * agents.len());
-
-        thread_rng().shuffle(&mut agent_battle_indexer);
+        let mut battle_threads = Vec::with_capacity(rounds_per_batch * agents.len());
+        let mut battle_stats_per_agent = vec![Vec::with_capacity(rounds_per_batch * 2); agents.len()];
 
         crossbeam::scope(|battle_scope| {
+            thread_rng().shuffle(&mut agent_battle_indexer);
+
             for (agent1_index_tmp, agent2_index_tmp) in agent_battle_indexer.iter().zip(0..agents.len()) {
                 let agent1_index = (*agent1_index_tmp).clone();
                 let agent2_index = agent2_index_tmp.clone();
@@ -332,42 +335,18 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
                         drop(guard);
                     }
 
-                    let train_agent = |agent: &mut NeuralNetworkAgent, trace: GameTrace, player: Color| {
-                        agent.train(&trace, 0.8, player)
+                    let trace = match agent2 {
+                        None => thread_trainer.battle(&*agent1, &*agent1),
+                        Some(mut actual_agent2) => {
+                            let mut agent1_ref = &mut *agent1;
+                            let mut agent2_ref = &mut *actual_agent2;
+                            thread_trainer.battle(agent1_ref, agent2_ref)
+                        }
                     };
-
-                    let mut agent1_error = None;
-                    let mut agent2_error = None;
-                    let trace;
-
-                    if agent2.is_none() {
-                        trace = thread_trainer.battle(&*agent1, &*agent1);
-                        agent1_error = Some(train_agent(&mut *agent1, trace.clone(), Color::GREEN));
-                    } else {
-                        let mut agent1_ref = &mut *agent1;
-                        let mut agent2_ref = &mut *agent2.unwrap();
-                        trace = thread_trainer.battle(agent1_ref, agent2_ref);
-
-                        crossbeam::scope(|train_scope| {
-                            let trace_clone_1 = trace.clone();
-                            let trace_clone_2 = trace.clone();
-                            let agent1_trainer_thread = train_scope.spawn(move || {
-                                return train_agent(&mut agent1_ref, trace_clone_1, Color::GREEN)
-                            });
-                            let agent2_trainer_thread = train_scope.spawn(move || {
-                                return train_agent(&mut agent2_ref, trace_clone_2, Color::RED)
-                            });
-
-                            agent1_error = Some(agent1_trainer_thread.join().unwrap());
-                            agent2_error = Some(agent2_trainer_thread.join().unwrap());
-                        });
-                    }
 
                     return BattleStats {
                         agent1_index: agent1_index,
-                        agent1_error: agent1_error,
                         agent2_index: agent2_index,
-                        agent2_error: agent2_error,
                         trace: trace
                     };
                 }));
@@ -375,19 +354,41 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
 
             for battle_thread in battle_threads {
                 let stats = battle_thread.join().unwrap();
-
+                
                 agent_stats[(stats.agent1_index, stats.agent2_index)] += match stats.trace.get_winner() {
                     Some(Color::GREEN) => 1,
                     Some(Color::RED) => -1,
                     None => 0
                 };
 
-                agent_errors[(stats.agent1_index, 0)] += stats.agent1_error.unwrap_or(0_f64);
-                agent_errors[(stats.agent2_index, 0)] += stats.agent2_error.unwrap_or(0_f64);
+                battle_stats_per_agent[stats.agent1_index].push((Color::GREEN, stats.trace.clone()));
+                battle_stats_per_agent[stats.agent2_index].push((Color::RED, stats.trace));
             }
 
-            MatrixHandle::synchronize(false);
         });
+
+        crossbeam::scope(|training_scope| {
+            let train_agent = |agent: &mut NeuralNetworkAgent, traces: &[(Color, GameTrace)]| {
+                agent.train(traces, 0.8)
+            };
+
+            let mut training_threads = Vec::with_capacity(agents.len());
+            for agent_index in 0 .. agents.len() {
+                let agent_mutex = unsafe { &mut *agents[agent_index].get() };
+                let battle_stats_ref = &battle_stats_per_agent[agent_index];
+
+                training_threads.push(training_scope.spawn(move || {
+                    let mut agent = agent_mutex.lock().unwrap();
+                    (agent_index, train_agent(&mut agent, battle_stats_ref))
+                }));
+            }
+            for training_thread in training_threads {
+                let (agent_index, error) = training_thread.join().unwrap();
+                agent_errors[(agent_index, 0)] += error; 
+            }
+        });
+
+        MatrixHandle::synchronize(false);
     }
 }
 
@@ -454,10 +455,10 @@ fn main() {
     let mut agents = construct_agents(game_description);
 
     println!("Loading saved agents...");
-    agents.push(UnsafeCell::new(Mutex::new(deserialize_agent("best_agents/test_agent.json"))));
+    // agents.push(UnsafeCell::new(Mutex::new(deserialize_agent("best_agents/test_agent.json"))));
 
     println!("Battle agents...");
-    battle_agents(100, &trainer, &agents);
+    battle_agents(250, &trainer, &agents);
 
     /*
     unsafe {
