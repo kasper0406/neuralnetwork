@@ -1,6 +1,7 @@
 extern crate rand;
 
 use matrix::Matrix;
+use matrixhandle::MatrixHandle;
 use activationfunction::ActivationFunction;
 use activationfunction::{Relu, Sigmoid, TwoPlayerScore};
 use std::ops::{Add, AddAssign, Mul, Index};
@@ -19,19 +20,19 @@ pub enum ActivationFunctionDescriptor {
 #[derive(Serialize, Deserialize)]
 pub struct Layer {
     function_descriptor: ActivationFunctionDescriptor,
-    weights: Matrix<f64>
+    weights: MatrixHandle
 }
 
 #[derive(Serialize, Deserialize)]
 pub enum DropoutType {
-    Weight(f64),
-    Neuron(f64),
+    Weight(f32),
+    Neuron(f32),
     None
 }
 
 #[derive(Serialize, Deserialize)]
 pub enum Regulizer {
-    WeightPeanalizer(f64)
+    WeightPeanalizer(f32)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -55,9 +56,11 @@ impl NeuralNetwork {
         let layers = layers.iter().map(|layer| {
             let network_layer = Layer {
                 function_descriptor: layer.function_descriptor,
-                weights: Matrix::new(layer.num_neurons, prev_layer_neurons + 1, &|row, col| {
-                    return weight_distribution.sample(&mut rand::thread_rng());
-                })
+                weights: MatrixHandle::from_matrix(
+                    Matrix::new(layer.num_neurons, prev_layer_neurons + 1, &|row, col| {
+                        weight_distribution.sample(&mut rand::thread_rng()) as f32
+                    })
+                )
             };
             prev_layer_neurons = layer.num_neurons;
 
@@ -79,32 +82,34 @@ impl NeuralNetwork {
         self.regulizer = regulizer;
     }
 
-    pub fn predict(&self, input: &Matrix<f64>) -> Matrix<f64> {
+    pub fn predict(&self, input: &MatrixHandle) -> MatrixHandle {
         return self.layers.iter().fold(input.clone(), |acc, layer| {
             let layer_function = self.get_activation_function(layer);
-            return layer_function.evaluate(&(&layer.weights * &acc.add_constant_row(1_f64)));
+            layer_function.evaluate(&(&layer.weights * &acc.add_constant_row(1_f32)))
         });
     }
 
-    pub fn error(&self, input: &Matrix<f64>, expected: &Matrix<f64>) -> f64 {
+    pub fn error(&self, input: &MatrixHandle, expected: &MatrixHandle) -> f32 {
         assert!(expected.columns() == 1, "Expected exactly on column in expectation");
 
         let prediction = self.predict(input);
         return self.error_from_prediction(expected, &prediction);
     }
 
-    pub fn error_from_prediction(&self, expected: &Matrix<f64>, prediction: &Matrix<f64>) -> f64 {
+    pub fn error_from_prediction(&self, expected: &MatrixHandle, prediction: &MatrixHandle) -> f32 {
         assert!(prediction.columns() == 1, "Expected exactly on column in prediction");
         assert!(expected.rows() == prediction.rows(), "Expected and prediction should have same length!");
 
-        let mut error = 0_f64;
-        for row in 0..expected.rows() {
-            error += (expected[(row, 0)] - prediction[(row, 0)]).powi(2);
+        // TODO(knielsen): Consider implementing this on the GPU
+        let errors = MatrixHandle::to_matrix(&(expected - prediction));
+        let mut error = 0_f32;
+        for i in 0 .. expected.rows() {
+            error += errors[(i, 0)];
         }
         return error;
     }
 
-    fn compute_weights_with_dropouts(&self) -> Vec<Matrix<f64>> {
+    fn compute_weights_with_dropouts(&self) -> Vec<MatrixHandle> {
         return self.layers.iter().enumerate().map(|(i, layer)| {
             match self.dropout {
                 DropoutType::None => return layer.weights.clone(),
@@ -121,17 +126,14 @@ impl NeuralNetwork {
         }).collect();
     }
 
-    fn get_regulizer_penalty(&self, weights: &Matrix<f64>) -> Matrix<f64> {
+    fn get_regulizer_penalty(&self, weights: &MatrixHandle) -> MatrixHandle {
         match self.regulizer {
-            None => Matrix::new(weights.rows(), weights.columns(), &|row, col| 0_f64),
-            Some(Regulizer::WeightPeanalizer(lambda)) => Matrix::new(weights.rows(), weights.columns(), &|row, col| {
-                let lambda = 0.00003_f64;
-                return lambda * weights[(row, col)];
-            })
+            None => panic!("get_regulizer_penalty should never be called with None value"),
+            Some(Regulizer::WeightPeanalizer(lambda)) => lambda * weights
         }
     }
 
-    pub fn train(&mut self, input: &Matrix<f64>, expected: &Matrix<f64>, alpha: f64, beta: f64, momentums: &Option<Vec<Matrix<f64>>>) -> Vec<Matrix<f64>> {
+    pub fn train(&mut self, input: &MatrixHandle, expected: &MatrixHandle, alpha: f32, beta: f32, momentums: &Option<Vec<MatrixHandle>>) -> Vec<MatrixHandle> {
         let weights_with_dropout = self.compute_weights_with_dropouts();
         let (predictions, deltas) = self.predict_for_training(input, &weights_with_dropout);
         let prediction = predictions.last().unwrap();
@@ -139,15 +141,15 @@ impl NeuralNetwork {
         let num_layers = self.layers.len();
         let mut gradients = Vec::with_capacity(num_layers);
 
-        let mut chain = (prediction - &expected).entrywise_product(deltas.last().unwrap());
+        let mut chain = (prediction - expected).entrywise_product(deltas.last().unwrap());
         for (i, dropout_weights) in weights_with_dropout.iter().rev().enumerate() {
-            let mut gradient = &chain * &predictions[num_layers - i - 1].add_constant_row(1_f64).transpose();
+            let mut gradient = &chain * &predictions[num_layers - i - 1].add_constant_row(1_f32).transpose();
             if self.regulizer.is_some() {
                 gradient += self.get_regulizer_penalty(&dropout_weights);
             }
 
             if i < num_layers - 1 {
-                chain = (dropout_weights.transpose().remove_first_row() * chain).entrywise_product(&deltas[num_layers - 2 - i]);
+                chain = (&dropout_weights.transpose().remove_first_row() * &chain).entrywise_product(&deltas[num_layers - 2 - i]);
             }
 
             gradients.push(gradient);
@@ -156,7 +158,9 @@ impl NeuralNetwork {
         let unwrapped_momentums = momentums.clone().unwrap_or_else(|| {
             let mut ms = Vec::with_capacity(self.layers.len());
             for layer in self.layers.iter().rev() {
-                ms.push(Matrix::new(layer.weights.rows(), layer.weights.columns(), &|row, col| 0_f64));
+                ms.push(MatrixHandle::from_matrix(
+                    Matrix::new(layer.weights.rows(), layer.weights.columns(), &|row, col| 0_f32))
+                );
             }
             return ms;
         });
@@ -172,7 +176,7 @@ impl NeuralNetwork {
         return new_momentums;
     }
 
-    fn get_activation_function(&self, layer: &Layer) -> Box<ActivationFunction<Matrix<f64>>> {
+    fn get_activation_function(&self, layer: &Layer) -> Box<ActivationFunction<MatrixHandle>> {
         match layer.function_descriptor {
             ActivationFunctionDescriptor::Sigmoid => Box::new(Sigmoid {}),
             ActivationFunctionDescriptor::Relu => Box::new(Relu {}),
@@ -180,7 +184,7 @@ impl NeuralNetwork {
         }
     }
 
-    fn predict_for_training(&self, input: &Matrix<f64>, weights_with_dropout: &Vec<Matrix<f64>>) -> (Vec<Matrix<f64>>, Vec<Matrix<f64>>) {
+    fn predict_for_training(&self, input: &MatrixHandle, weights_with_dropout: &Vec<MatrixHandle>) -> (Vec<MatrixHandle>, Vec<MatrixHandle>) {
         let mut results = Vec::with_capacity(self.layers.len() + 1);
         results.push(input.clone());
 
@@ -188,7 +192,7 @@ impl NeuralNetwork {
         let layers_with_dropout: Vec<_> = self.layers.iter().zip(weights_with_dropout.iter()).collect();
         for (layer, dropout_weights) in layers_with_dropout {
             let layer_function = self.get_activation_function(layer);
-            let last_result_with_bias = results.last().unwrap().add_constant_row(1_f64);
+            let last_result_with_bias = results.last().unwrap().add_constant_row(1_f32);
             
             let eval = dropout_weights * &last_result_with_bias;
             results.push(layer_function.evaluate(&eval));

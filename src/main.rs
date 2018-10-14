@@ -22,6 +22,9 @@ use std::cell::UnsafeCell;
 use std::thread;
 use std::rc::Rc;
 
+mod matrixhandle;
+use matrixhandle::MatrixHandle;
+
 mod activationfunction;
 use activationfunction::{Relu, Sigmoid, TwoPlayerScore};
 use activationfunction::ActivationFunction;
@@ -54,13 +57,6 @@ use ksuccessiontrainer::{ KSuccessionTrainer, Agent, TrainableAgent, HumanAgent,
 extern crate test;
 use test::Bencher;
 
-use std::ops::{Add, AddAssign, Sub, Mul, Index, IndexMut};
-
-struct ImageSample {
-    values: Matrix<f64>,
-    label: Matrix<f64>
-}
-
 struct BattleStats {
     agent1_index: usize,
     agent1_error: Option<f64>,
@@ -69,44 +65,12 @@ struct BattleStats {
     trace: GameTrace
 }
 
-fn load_kasper_samples() -> Vec<ImageSample> {
-    let mut result = vec![];
-    for category in &vec![("handwritten", 3), ("machine", 4)] {
-        for i in 0..10 {
-            let filename = format!("./data/digits/{}_{}.raw", i, category.0);
-            let mut file = File::open(&filename).expect("File not found");
-
-            let mut pixels = Vec::with_capacity(16 * 16);
-            let mut pixel_buffer = [0; 3];
-            while let Ok(read_bytes) = file.read(&mut pixel_buffer) {
-                if (read_bytes == 0) {
-                    break;
-                }
-                pixels.push(1_f64 - ((pixel_buffer[0] as f64 + pixel_buffer[1] as f64 + pixel_buffer[2] as f64) / (3 * 255) as f64));
-
-                // Monster hack to adjust for image format
-                if (category.1 == 4) {
-                    let mut tmp_buffer = [0; 1];
-                    file.read(&mut tmp_buffer);
-                }
-            }
-
-            result.push(ImageSample {
-                label: Matrix::new(10, 1, &|row, col| if i == row { 1_f64 } else { 0_f64 }),
-                values: Matrix::new(16 * 16, 1, &|row, col| pixels[row])
-            });
-        }
-    }
-
-    return result;
-}
-
 fn construct_agent(game_description: GameDescription, layers: &[LayerDescription]) -> NeuralNetworkAgent {
     let sample_game = GameDescription::construct_game(game_description);
 
     let mut nn = NeuralNetwork::new(sample_game.get_rows() * sample_game.get_columns(), layers.to_vec());
     nn.set_dropout(DropoutType::Weight(0.10));
-    nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f64)));
+    nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f32)));
 
     NeuralNetworkAgent::new(game_description, nn, 0.2)
 }
@@ -238,8 +202,8 @@ fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<N
         agents.push(UnsafeCell::new(Mutex::new(construct_agent(game_description, layers_to_use))));
     }
 
-    // agents.push(UnsafeCell::new(Mutex::new(construct_deep_agent(game_description))));
-    // agents.push(UnsafeCell::new(Mutex::new(construct_wide_agent(game_description))));
+    agents.push(UnsafeCell::new(Mutex::new(construct_deep_agent(game_description))));
+    agents.push(UnsafeCell::new(Mutex::new(construct_wide_agent(game_description))));
 
     return agents;
 }
@@ -421,6 +385,8 @@ fn battle_agents(rounds: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCe
                 agent_errors[(stats.agent1_index, 0)] += stats.agent1_error.unwrap_or(0_f64);
                 agent_errors[(stats.agent2_index, 0)] += stats.agent2_error.unwrap_or(0_f64);
             }
+
+            MatrixHandle::synchronize(false);
         });
     }
 }
@@ -455,200 +421,6 @@ fn initialize_rayon_thread_pool() {
     rayon::ThreadPoolBuilder::new().num_threads(num_threads).build_global().unwrap();
 }
 
-#[repr(C)]
-struct MatrixHandle {
-    rows: usize,
-    columns: usize,
-    elements: *const f32
-}
-
-impl MatrixHandle {
-    fn empty() -> MatrixHandle {
-        MatrixHandle {
-            rows: 0,
-            columns: 0,
-            elements: ptr::null()
-        }
-    }
-
-    fn from_matrix(matrix: Matrix<f32>) -> MatrixHandle {
-        let mut handle: MatrixHandle = MatrixHandle::empty();
-
-        let alloc_result = unsafe {
-            matrix_alloc(matrix.rows(),
-                         matrix.columns(),
-                         matrix.raw_values().as_ptr(),
-                         &mut handle as *mut MatrixHandle)
-        };
-        if alloc_result != 0 {
-            panic!("Failed to create MatrixHandle");
-        }
-
-        return handle;
-    }
-
-    fn to_matrix(handle: &MatrixHandle) -> Matrix<f32> {
-        Matrix::new(handle.rows, handle.columns, &|row, column| {
-            unsafe { *(handle.elements.offset((row * handle.columns + column) as isize)) }
-        })
-    }
-
-    fn entrywise_product(&self, rhs: &MatrixHandle) -> MatrixHandle {
-        let mut result_handle = MatrixHandle::empty();
-        let result = unsafe {
-            matrix_entrywise_multiply(self as *const MatrixHandle,
-                                      rhs as *const MatrixHandle,
-                                      &mut result_handle as *mut MatrixHandle)
-        };
-        if result != 0 {
-            panic!("Failed to entrywise-product matrices!");
-        }
-        return result_handle;
-    }
-
-    fn transpose(&self) -> MatrixHandle {
-        let mut result_handle = MatrixHandle::empty();
-        let result = unsafe {
-            matrix_transpose(self as *const MatrixHandle,
-                             &mut result_handle as *mut MatrixHandle)
-        };
-        if result != 0 {
-            panic!("Failed to transpose matrices!");
-        }
-        return result_handle;
-    }
-
-    fn add_constant_row(&self, padding: f32) -> MatrixHandle {
-        let mut result_handle = MatrixHandle::empty();
-        let result = unsafe {
-            matrix_add_constant_row(padding,
-                                    self as *const MatrixHandle,
-                                    &mut result_handle as *mut MatrixHandle)
-        };
-        if result != 0 {
-            panic!("Failed to transpose matrices!");
-        }
-        return result_handle;
-    }
-
-    // Kind of hacky, assumes no side effects. Fine for now, and it's fast!
-    fn remove_first_row(&self) -> MatrixHandle {
-        assert!(self.rows > 1, "Matrix must have > 1 row!");
-
-        MatrixHandle {
-            rows: self.rows - 1,
-            columns: self.columns,
-            elements: unsafe { self.elements.offset(self.columns as isize) }
-        }
-    }
-
-    fn dropout_elements(&self, rate: f32) -> MatrixHandle {
-        let mut result_handle = MatrixHandle::empty();
-        let result = unsafe {
-            matrix_dropout_elements(rate,
-                                    self as *const MatrixHandle,
-                                    &mut result_handle as *mut MatrixHandle)
-        };
-        if result != 0 {
-            panic!("Failed to transpose matrices!");
-        }
-        return result_handle;
-    }
-
-    fn dropout_rows(&self, rate: f32) -> MatrixHandle {
-        let mut result_handle = MatrixHandle::empty();
-        let result = unsafe {
-            matrix_dropout_rows(rate,
-                                self as *const MatrixHandle,
-                                &mut result_handle as *mut MatrixHandle)
-        };
-        if result != 0 {
-            panic!("Failed to transpose matrices!");
-        }
-        return result_handle;
-    }
-}
-
-impl Drop for MatrixHandle {
-    fn drop(&mut self) {
-        if self.elements != ptr::null() {
-            unsafe { matrix_free(self as *mut MatrixHandle) };
-        }
-    }
-}
-
-impl<'a> Add for &'a MatrixHandle {
-    type Output = MatrixHandle;
-
-    fn add(self, rhs: &MatrixHandle) -> MatrixHandle {
-        let mut result_handle = MatrixHandle::empty();
-        let add_result = unsafe {
-            matrix_add(self as *const MatrixHandle,
-                       rhs as *const MatrixHandle,
-                       &mut result_handle as *mut MatrixHandle)
-        };
-        if add_result != 0 {
-            panic!("Failed to add matrices!");
-        }
-        return result_handle;
-    }
-}
-
-impl<'a> Mul for &'a MatrixHandle {
-    type Output = MatrixHandle;
-
-    fn mul(self, rhs: &MatrixHandle) -> MatrixHandle {
-        let mut result_handle = MatrixHandle::empty();
-        let add_result = unsafe {
-            matrix_multiply(self as *const MatrixHandle,
-                            rhs as *const MatrixHandle,
-                            &mut result_handle as *mut MatrixHandle)
-        };
-        if add_result != 0 {
-            panic!("Failed to add matrices!");
-        }
-        return result_handle;
-    }
-}
-
-#[link(name = "matrix", kind = "static")]
-extern {
-
-    fn matrix_alloc(rows: libc::size_t,
-                    columns: libc::size_t,
-                    elements: *const libc::c_float,
-                    handle: *mut MatrixHandle) -> libc::c_int;
-
-    fn matrix_free(handle: *mut MatrixHandle);
-
-    fn matrix_add(handle_a: *const MatrixHandle,
-                  handle_b: *const MatrixHandle,
-                  handle_result: *mut MatrixHandle) -> libc::c_int;
-
-    fn matrix_entrywise_multiply(handle_a: *const MatrixHandle,
-                                 handle_b: *const MatrixHandle,
-                                 handle_result: *mut MatrixHandle) -> libc::c_int;
-
-    fn matrix_multiply(handle_a: *const MatrixHandle,
-                       handle_b: *const MatrixHandle,
-                       handle_result: *mut MatrixHandle) -> libc::c_int;
-    
-    fn matrix_transpose(handle_a: *const MatrixHandle,
-                        handle_result: *mut MatrixHandle) -> libc::c_int;
-
-    fn matrix_add_constant_row(padding: f32,
-                               handle_a: *const MatrixHandle,
-                               handle_result: *mut MatrixHandle) -> libc::c_int;
-
-    fn matrix_dropout_elements(rate: f32,
-                               handle_a: *const MatrixHandle,
-                               handle_result: *mut MatrixHandle) -> libc::c_int;
-
-    fn matrix_dropout_rows(rate: f32,
-                           handle_a: *const MatrixHandle,
-                           handle_result: *mut MatrixHandle) -> libc::c_int;
-}
-
 /*
 #[bench]
 fn matrix_operations_cpu(b: &mut Bencher) {
@@ -675,19 +447,6 @@ fn matrix_operations_gpu(b: &mut Bencher) {
 
 fn main() {
 
-    let A = Matrix::new(20, 10, &|row, col| (row + 2 * col) as f32);
-    let B = Matrix::new(10, 20, &|row, col| (2 * row + col) as f32);
-
-    println!("{}", A.add_constant_row(9_f32).remove_first_row().dropout_rows(0.7));
-
-    let handle_a = MatrixHandle::from_matrix(A);
-    let handle_b = MatrixHandle::from_matrix(B);
-
-    let result = handle_a.add_constant_row(9_f32).remove_first_row().dropout_rows(0.7);
-    println!("{}", MatrixHandle::to_matrix(&result));
-
-    return;
-
     initialize_rayon_thread_pool();
 
     let game_description = GameDescription::FourInARow;
@@ -698,8 +457,9 @@ fn main() {
     agents.push(UnsafeCell::new(Mutex::new(deserialize_agent("best_agents/test_agent.json"))));
 
     println!("Battle agents...");
-    battle_agents(1000000, &trainer, &agents);
+    battle_agents(100, &trainer, &agents);
 
+    /*
     unsafe {
         let mut agent0 = (&mut *agents[0].get()).lock().unwrap();
 
@@ -713,147 +473,5 @@ fn main() {
             agent0.train(&trace, 0.8, Color::GREEN);
         }
     }
-
-
-    /*
-    let actions = vec![0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1];
-    for action in actions {
-        println!("{} playing at column {}", game.get_current_player(), action);
-        if let Some(winner) = game.play(action) {
-            println!("{}", game);
-            println!("{} won the game!", winner);
-            break;
-        }
-        println!("{}", game);
-        println!("");
-    }
     */
-
-    return;
-
-    let sigmoid = &Sigmoid;
-
-    // let pool = ThreadPool::new().expect("Failed to create thread pool!");
-    // let stream = stream::iter(1..3);
-
-    let image_size = 16 * 16;
-
-    let mut file = File::open("./data/semeion.data").expect("Data file not found!");
-    let mut content = String::new();
-    file.read_to_string(&mut content).expect("Failed reading dataset file!");
-    let mut samples: Vec<ImageSample> = content.trim().split("\n")
-        .map(|sample| {
-            let raw_values: Vec<f64> = sample.trim().split(" ").map(|value| {
-                return value.parse().unwrap();
-            }).collect();
-
-            return ImageSample {
-                values: Matrix::new(image_size, 1, &|row, col| raw_values[row]),
-                label: Matrix::new(10, 1, &|row, col| raw_values[image_size + row])
-            }
-        })
-        .collect();
-
-    println!("#samples = {}", samples.len());
-
-    let print_sample = |sample: &Matrix<f64>| {
-        for i in 0..16 {
-            let mut values = Vec::with_capacity(16);
-            for j in 0..16 {
-                values.push(sample[(i * 16 + j, 0)].to_string());
-            }
-            println!("{}", values.join(""));
-        }
-    };
-
-    let relu = &Relu;
-
-    let layers = vec![
-        /*
-        LayerDescription {
-            num_neurons: 80_usize,
-            function: relu
-        }, */
-        LayerDescription {
-            num_neurons: 50_usize,
-            function_descriptor: ActivationFunctionDescriptor::Sigmoid
-        },
-        LayerDescription {
-            num_neurons: 25_usize,
-            function_descriptor: ActivationFunctionDescriptor::Sigmoid
-        },
-        LayerDescription {
-            num_neurons: 10_usize,
-            function_descriptor: ActivationFunctionDescriptor::Sigmoid
-        }
-    ];
-
-    let mut nn = NeuralNetwork::new(image_size, layers.clone());
-    nn.set_dropout(DropoutType::Weight(0.10));
-    // nn.set_dropout(DropoutType::Neuron(0.05));
-    nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f64)));
-
-    let compute_avg_error = |network: &NeuralNetwork, samples: &[ImageSample]| {
-        let total_error = samples.iter().fold(0_f64, |acc, sample| {
-            return acc + network.error(&sample.values, &sample.label);
-        });
-        return total_error / samples.len() as f64;
-    };
-
-    thread_rng().shuffle(&mut samples);
-    let training_samples = &samples[0..1000];
-    let test_samples = &samples[1000..];
-
-    let mut kasper_samples = load_kasper_samples();
-    thread_rng().shuffle(&mut kasper_samples);
-
-    for round in 0..50 {
-        let in_sample_error = compute_avg_error(&nn, training_samples);
-        println!("Avg error after {} rounds: {} in-sample, {} out-of-sample",
-            round, in_sample_error, compute_avg_error(&nn, test_samples));
-
-        let mut momentum = None;
-        for _ in 0..100000 {
-            let sample = rand::thread_rng().choose(&training_samples).unwrap();
-            momentum = Some(nn.train(&sample.values, &sample.label, 0.02_f64, 0.95_f64, &momentum));
-        }
-    }
-
-    println!("Avg error after training: {} in-sample, {} out-of-sample",
-            compute_avg_error(&nn, training_samples), compute_avg_error(&nn, test_samples));
-
-    /*
-    for kasper_sample in &load_kasper_samples() {
-        let prediction = nn.predict(&kasper_sample.values);
-        print_sample(&kasper_sample.values);
-        println!("Label:\n{}", kasper_sample.label.transpose());
-        println!("Prediction:\n{}", prediction);
-    }*/
-
-    println!("");
-    println!("Classification matrix - rows are labels, columns are predictions:");
-    let mut classification_matrix = Matrix::new(10, 10, &|row, col| 0);
-    let mut total_misclassified = 0;
-    for sample in test_samples {
-        let prediction_vector = nn.predict(&sample.values);
-
-        let mut prediction = 0;
-        let mut actual = 0;
-        for i in 0..10 {
-            if prediction_vector[(i, 0)] > prediction_vector[(prediction, 0)] {
-                prediction = i;
-            }
-            if sample.label[(i, 0)] > sample.label[(actual, 0)] {
-                actual = i;
-            }
-        }
-
-        classification_matrix[(actual, prediction)] += 1;
-        if actual != prediction {
-            total_misclassified += 1;
-        }
-    }
-    println!("{}", classification_matrix);
-    println!("Misclassified {} out of {} ({}%)", total_misclassified, test_samples.len(),
-        (total_misclassified as f64 / test_samples.len() as f64) * 100_f64);
 }

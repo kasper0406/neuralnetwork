@@ -1,5 +1,6 @@
 extern crate rand;
 
+use matrixhandle::MatrixHandle;
 use ksuccession::{ KSuccession, Color };
 use neuralnetwork::{ NeuralNetwork, LayerDescription };
 use matrix::Matrix;
@@ -7,6 +8,7 @@ use rand::{thread_rng, Rng};
 use rand::distributions::Uniform;
 use std::iter::Iterator;
 use std::io;
+use std::slice;
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
 pub enum GameDescription {
@@ -68,7 +70,7 @@ pub trait TrainableAgent: Agent {
 #[derive(Serialize, Deserialize)]
 pub struct NeuralNetworkAgent {
     value_net: NeuralNetwork,
-    momentums: Option<Vec<Matrix<f64>>>,
+    momentums: Option<Vec<MatrixHandle>>,
     game_description: GameDescription,
     exploration_rate: f64,
     verbose: bool
@@ -93,36 +95,51 @@ impl NeuralNetworkAgent {
         self.verbose = verbose;
     }
 
-    fn to_nn_config(game: &KSuccession) -> Matrix<f64> {
-        return Matrix::new(game.get_rows() * game.get_columns(), 1, &|row, col| {
-            return match game.get_board()[row] {
-                Some(player) => KSuccessionTrainer::player_value(player),
-                None => 0_f64
-            }
-        });
+    fn to_nn_config(games: &[KSuccession]) -> MatrixHandle {
+        return MatrixHandle::from_matrix(
+            Matrix::new(games[0].get_rows() * games[0].get_columns(), games.len(), &|row, col| {
+                match games[col].get_board()[row] {
+                    Some(player) => KSuccessionTrainer::player_value(player),
+                    None => 0_f32
+                }
+            })
+        );
     }
 
-    fn get_best_action(&self, game: &KSuccession) -> Option<(usize, f64)> {
-        let mut best_action = None;
-        for action in 0..game.get_columns() {
-            match game.game_with_action(action).map(|game| NeuralNetworkAgent::to_nn_config(&game)) {
-                None => (), // The action is invalid
-                Some(nn_config) => {
-                    let value = self.value_net.predict(&nn_config)[(0, 0)];
-                    // println!("Predicted {} to value {}", game.game_with_action(action).unwrap(), value);
+    fn get_best_action(&self, game: &KSuccession) -> Option<(usize, f32)> {
 
-                    match best_action {
-                        None => best_action = Some((action, value)),
-                        Some((_, prev_best)) => {
-                            let player_modifier = KSuccessionTrainer::player_value(game.get_current_player());
-                            if value * player_modifier > prev_best * player_modifier {
-                                best_action = Some((action, value));
-                            }
-                        }
+        let mut action_numbers = Vec::with_capacity(game.get_columns());
+        let mut possible_games = Vec::with_capacity(game.get_columns());
+        for action in 0..game.get_columns() {
+            match game.game_with_action(action) {
+                None => (), // The action is invalid
+                Some(possible_game) => {
+                    action_numbers.push(action);
+                    possible_games.push(possible_game);
+                }
+            }
+        }
+        let predictions = MatrixHandle::to_matrix(&self.value_net.predict(
+            &NeuralNetworkAgent::to_nn_config(&possible_games)
+        ));
+
+        let player_modifier = KSuccessionTrainer::player_value(game.get_current_player());
+        let mut best_action = None;
+
+        for i in 0 .. predictions.columns() {
+            let value = predictions[(0, i)];
+            let action = action_numbers[i];
+
+            match best_action {
+                None => best_action = Some((action, value)),
+                Some((_, prev_best_value)) => {
+                    if value * player_modifier > prev_best_value * player_modifier {
+                        best_action = Some((action, value));
                     }
                 }
             }
         }
+
         return best_action;
     }
     
@@ -146,23 +163,28 @@ impl TrainableAgent for NeuralNetworkAgent {
 
         let total_rounds: i32 = trace.actions.len() as i32;
         let expected = |round: i32| {
-            Matrix::new(1, 1, &|row, col| {
-                return match trace.winner {
-                    None => 0_f64,
-                    Some(player) => KSuccessionTrainer::player_value(player) * discount_factor.powi(total_rounds - 1 - round)
-                };
-            })
+            MatrixHandle::from_matrix(
+                Matrix::new(1, 1, &|row, col| {
+                    match trace.winner {
+                        None => 0_f32,
+                        Some(player) => {
+                            let factor = discount_factor.powi(total_rounds - 1 - round) as f32;
+                            KSuccessionTrainer::player_value(player) * factor
+                        }
+                    }
+                })
+            )
         };
 
-        let alpha = 0.002_f64;
-        let beta = 0.90_f64;
+        let alpha = 0.002_f32;
+        let beta = 0.90_f32;
 
-        let mut error = 0_f64;
+        let mut error = 0_f32;
         let mut error_terms = 0;
 
         {
             let expect = expected(0);
-            let game_config = NeuralNetworkAgent::to_nn_config(&game);
+            let game_config = NeuralNetworkAgent::to_nn_config(slice::from_ref(&game));
 
             error += self.value_net.error(&game_config, &expect);
             error_terms += 1;
@@ -176,7 +198,7 @@ impl TrainableAgent for NeuralNetworkAgent {
 
             if !action.is_exploratory && game.get_current_player() != player {
                 let expect = expected(i.min(total_rounds - 1));
-                let game_config = NeuralNetworkAgent::to_nn_config(&game);
+                let game_config = NeuralNetworkAgent::to_nn_config(slice::from_ref(&game));
 
                 error += self.value_net.error(&game_config, &expect);
                 error_terms += 1;
@@ -187,7 +209,7 @@ impl TrainableAgent for NeuralNetworkAgent {
             i += 1;
         }
 
-        return error / (error_terms as f64);
+        return (error as f64) / (error_terms as f64);
     }
 }
 
@@ -199,7 +221,7 @@ impl Agent for NeuralNetworkAgent {
             // Random exploration move
             (self.sample_random_action(&game), true)
         } else {
-            (self.get_best_action(&game).map(|(action, value)| (action, Some(value))), false)
+            (self.get_best_action(&game).map(|(action, value)| (action, Some(value as f64))), false)
         };
 
         if let (Some((action, value)), is_exploratory) = best_action {
@@ -255,10 +277,10 @@ impl KSuccessionTrainer {
         }
     }
 
-    fn player_value(player: Color) -> f64 {
+    fn player_value(player: Color) -> f32 {
         return match player {
-            Color::GREEN => 1_f64,
-            Color::RED => -1_f64
+            Color::GREEN => 1_f32,
+            Color::RED => -1_f32
         };
     }
 
