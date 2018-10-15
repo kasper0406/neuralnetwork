@@ -103,14 +103,20 @@ impl NeuralNetwork {
         self.regulizer = regulizer;
     }
 
-    pub fn predict(&self, input: &MatrixHandle) -> MatrixHandle {
-        return self.layers.iter().fold(input.clone(), |acc, layer| {
+    pub fn predict(&mut self, input: &MatrixHandle) -> MatrixHandle {
+        MatrixHandle::copy(&mut self._predictions[0], input);
+
+        for (i, layer) in self.layers.iter().enumerate() {
             let layer_function = self.get_activation_function(layer);
-            layer_function.evaluate(&(&layer.weights * &acc.add_constant_row(1_f32)))
-        });
+            let last_result_with_bias = self._predictions[i].add_constant_row(1_f32);
+            
+            MatrixHandle::multiply(&mut self._predictions[i + 1], &layer.weights, &last_result_with_bias);
+            layer_function.inline_evaluate(&mut self._predictions[i + 1]);
+        }
+        self._predictions.last().unwrap().clone()
     }
 
-    pub fn error(&self, input: &MatrixHandle, expected: &MatrixHandle) -> f32 {
+    pub fn error(&mut self, input: &MatrixHandle, expected: &MatrixHandle) -> f32 {
         let prediction = self.predict(input);
         return self.error_from_prediction(expected, &prediction);
     }

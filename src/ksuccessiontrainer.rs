@@ -60,7 +60,7 @@ impl GameTrace {
 }
 
 pub trait Agent {
-    fn play(&self, game: &KSuccession) -> Action;
+    fn play(&mut self, game: &KSuccession) -> Action;
 }
 
 pub trait TrainableAgent: Agent {
@@ -106,7 +106,7 @@ impl NeuralNetworkAgent {
         );
     }
 
-    fn get_best_action(&self, game: &KSuccession) -> Option<(usize, f32)> {
+    fn get_best_action(&mut self, game: &KSuccession) -> Option<(usize, f32)> {
 
         let mut action_numbers = Vec::with_capacity(game.get_columns());
         let mut possible_games = Vec::with_capacity(game.get_columns());
@@ -204,7 +204,7 @@ impl TrainableAgent for NeuralNetworkAgent {
 }
 
 impl Agent for NeuralNetworkAgent {
-    fn play(&self, game: &KSuccession) -> Action {
+    fn play(&mut self, game: &KSuccession) -> Action {
         let distr = Uniform::new(0_f64, 1_f64);
 
         let best_action = if thread_rng().sample(distr) < self.exploration_rate {
@@ -235,7 +235,7 @@ impl HumanAgent {
 }
 
 impl Agent for HumanAgent {
-    fn play(&self, game: &KSuccession) -> Action {
+    fn play(&mut self, game: &KSuccession) -> Action {
         println!("Input an action for the following game:");
         println!("{}", game);
 
@@ -274,23 +274,24 @@ impl KSuccessionTrainer {
         };
     }
 
-    pub fn battle(&self, agent1: &Agent, agent2: &Agent) -> GameTrace {
+    pub fn battle(&self, agents: &mut Vec<&mut Agent>) -> GameTrace {
         let mut game = GameDescription::construct_game(self.game_description);
         let mut actions = Vec::with_capacity(game.get_rows() * game.get_columns());
+
         let mut winner = None;
+        let agents_len = agents.len();
 
-        let mut current_agent = 0;
-        let agents = vec![&agent1, &agent2];
-
+        let mut current_agent_idx = 0;
         for _step in 0..(game.get_rows() * game.get_columns()) {
-            let action = agents[current_agent].play(&game);
+            let current_agent = &mut agents[current_agent_idx];
+            let action = current_agent.play(&game);
             winner = game.play(action.action);
             actions.push(action);
             if winner != None {
                 break;
             }
 
-            current_agent = (current_agent + 1) % agents.len();
+            current_agent_idx = (current_agent_idx + 1) % agents_len;
         }
 
         GameTrace {

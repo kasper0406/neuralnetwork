@@ -340,11 +340,15 @@ fn battle_agents(batches: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeC
                         }
 
                         let trace = match agent2 {
-                            None => thread_trainer.battle(&*agent1, &*agent1),
+                            None => {
+                                let mut agents: Vec<&mut Agent> = vec![&mut *agent1];
+                                thread_trainer.battle(&mut agents)
+                            },
                             Some(mut actual_agent2) => {
                                 let mut agent1_ref = &mut *agent1;
                                 let mut agent2_ref = &mut *actual_agent2;
-                                thread_trainer.battle(agent1_ref, agent2_ref)
+                                let mut agents: Vec<&mut Agent> = vec![agent1_ref, agent2_ref];
+                                thread_trainer.battle(&mut agents)
                             }
                         };
 
@@ -467,7 +471,7 @@ fn main() {
     // agents.push(UnsafeCell::new(Mutex::new(deserialize_agent("best_agents/test_agent.json"))));
 
     println!("Battle agents...");
-    battle_agents(50, &trainer, &agents);
+    battle_agents(100, &trainer, &agents);
 
     /*
     unsafe {
