@@ -8,7 +8,8 @@ pub struct MatrixHandle {
     rows: usize,
     columns: usize,
     elements: *const f32,
-    allocated_bytes: usize
+    allocated_bytes: usize,
+    base_ptr: *const f32
 }
 
 unsafe impl Send for MatrixHandle { }
@@ -57,9 +58,15 @@ extern {
     fn matrix_transpose(handle_a: *const MatrixHandle,
                         handle_result: *mut MatrixHandle) -> libc::c_int;
 
+    fn matrix_inplace_transpose(handle: *mut MatrixHandle) -> libc::c_int;
+
     fn matrix_add_constant_row(padding: f32,
                                handle_a: *const MatrixHandle,
                                handle_result: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_inplace_add_constant_row(padding: f32, handle: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_inplace_remove_first_row(handle: *mut MatrixHandle) -> libc::c_int;
 
     fn matrix_dropout_elements(rate: f32,
                                handle_a: *const MatrixHandle,
@@ -79,7 +86,8 @@ impl MatrixHandle {
             rows: 0,
             columns: 0,
             elements: ptr::null(),
-            allocated_bytes: 0
+            allocated_bytes: 0,
+            base_ptr: ptr::null()
         }
     }
 
@@ -109,7 +117,7 @@ impl MatrixHandle {
                          &mut handle as *mut MatrixHandle)
         };
         if alloc_result != 0 {
-            panic!("Failed to create MatrixHandle");
+            panic!("Failed to create MatrixHandle: {}", alloc_result);
         }
 
         return handle;
@@ -187,6 +195,15 @@ impl MatrixHandle {
         return result_handle;
     }
 
+    pub fn inplace_transpose(&mut self) {
+        let result = unsafe {
+            matrix_inplace_transpose(self as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to inplace transpose!");
+        }
+    }
+
     pub fn add_constant_row(&self, padding: f32) -> MatrixHandle {
         let mut result_handle = MatrixHandle::empty();
         let result = unsafe {
@@ -195,20 +212,28 @@ impl MatrixHandle {
                                     &mut result_handle as *mut MatrixHandle)
         };
         if result != 0 {
-            panic!("Failed to transpose matrices!");
+            panic!("Failed to add constant row!");
         }
         return result_handle;
     }
 
-    // Kind of hacky, assumes no side effects. Fine for now, and it's fast!
-    pub fn remove_first_row(&self) -> MatrixHandle {
-        assert!(self.rows > 1, "Matrix must have > 1 row!");
+    pub fn inplace_add_constant_row(&mut self, padding: f32) {
+        let result = unsafe {
+            matrix_inplace_add_constant_row(padding, self as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to inplace add constant row!");
+        }
+    }
 
-        MatrixHandle {
-            rows: self.rows - 1,
-            columns: self.columns,
-            elements: unsafe { self.elements.offset(self.columns as isize) },
-            allocated_bytes: self.allocated_bytes
+    // Kind of hacky, assumes no side effects. Fine for now, and it's fast!
+    pub fn inplace_remove_first_row(&mut self) {
+        assert!(self.rows > 0, "Matrix must have > 0 row!");
+        let result = unsafe {
+            matrix_inplace_remove_first_row(self as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to inplace remove first row!");
         }
     }
 

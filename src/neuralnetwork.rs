@@ -47,7 +47,9 @@ pub struct NeuralNetwork {
     // #[serde(skip_serializing, skip_deserializing)]
     _predictions: Vec<MatrixHandle>,
     // #[serde(skip_serializing, skip_deserializing)]
-    _deltas: Vec<MatrixHandle>
+    _deltas: Vec<MatrixHandle>,
+    // #[serde(skip_serializing, skip_deserializing)]
+    _gradients: Vec<MatrixHandle>
 }
 
 #[derive(Clone, Copy)]
@@ -80,9 +82,12 @@ impl NeuralNetwork {
         _predictions.push(MatrixHandle::of_size(layers[0].weights.columns(), MAX_INPUT_COLUMNS));
 
         let mut _deltas = Vec::with_capacity(layers.len());
+        let mut _gradients = Vec::with_capacity(layers.len());
         for i in 0 .. layers.len() {
             _predictions.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
             _deltas.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
+            _gradients.push(MatrixHandle::of_size(layers[layers.len() - i - 1].weights.rows(),
+                                                  layers[layers.len() - i - 1].weights.columns()));
         }
 
         return NeuralNetwork {
@@ -91,7 +96,8 @@ impl NeuralNetwork {
             regulizer: None,
 
             _predictions: _predictions,
-            _deltas: _deltas
+            _deltas: _deltas,
+            _gradients: _gradients
         }
     }
 
@@ -108,9 +114,14 @@ impl NeuralNetwork {
 
         for (i, layer) in self.layers.iter().enumerate() {
             let layer_function = self.get_activation_function(layer);
-            let last_result_with_bias = self._predictions[i].add_constant_row(1_f32);
+
+            self._predictions[i].inplace_add_constant_row(1_f32);
+            {
+                let (pred_split_1, pred_split_2) = self._predictions.split_at_mut(i + 1);
+                MatrixHandle::multiply(&mut pred_split_2[0], &layer.weights, &pred_split_1[i]);
+            }
+            self._predictions[i].inplace_remove_first_row();
             
-            MatrixHandle::multiply(&mut self._predictions[i + 1], &layer.weights, &last_result_with_bias);
             layer_function.inline_evaluate(&mut self._predictions[i + 1]);
         }
         self._predictions.last().unwrap().clone()
@@ -170,25 +181,41 @@ impl NeuralNetwork {
     }
 
     fn internal_train(&mut self, input: &MatrixHandle, expected: &MatrixHandle, alpha: f32, beta: f32, momentums: &Option<Vec<MatrixHandle>>) -> Vec<MatrixHandle> {
-        let weights_with_dropout = self.compute_weights_with_dropouts();
+        let mut weights_with_dropout = self.compute_weights_with_dropouts();
         self.predict_for_training(input, &weights_with_dropout);
-        let prediction = self._predictions.last().unwrap();
 
         let num_layers = self.layers.len();
-        let mut gradients = Vec::with_capacity(num_layers);
 
-        let mut chain = (prediction - expected).entrywise_product(self._deltas.last().unwrap());
-        for (i, dropout_weights) in weights_with_dropout.iter().rev().enumerate() {
-            let mut gradient = &chain * &self._predictions[num_layers - i - 1].add_constant_row(1_f32).transpose();
+        let mut chain = {
+            let prediction = self._predictions.last().unwrap();
+            (prediction - expected).entrywise_product(self._deltas.last().unwrap())
+        };
+
+        for (i, dropout_weights) in weights_with_dropout.iter_mut().rev().enumerate() {
+
+            // self._predictions[num_layers - i - 1] are not used for anything after this.
+            // Therefore we can go crazy with side effects to do less GPU memory allocation
+            self._predictions[num_layers - i - 1].inplace_add_constant_row(1_f32);
+            self._predictions[num_layers - i - 1].inplace_transpose();
+
+            MatrixHandle::multiply(&mut self._gradients[i], &chain, &self._predictions[num_layers - i - 1]);
+
+            // Clean up the operations
+            // TODO(knielsen): Consider not doing the extra transpose. Instead just be nasty and modify the MatrixHandle struct directly
+            self._predictions[num_layers - i - 1].inplace_transpose();
+            self._predictions[num_layers - i - 1].inplace_remove_first_row();
+
             if self.regulizer.is_some() {
-                gradient += self.get_regulizer_penalty(&dropout_weights);
+                self._gradients[i] += self.get_regulizer_penalty(&dropout_weights);
             }
 
             if i < num_layers - 1 {
-                chain = (&dropout_weights.transpose().remove_first_row() * &chain).entrywise_product(&self._deltas[num_layers - 2 - i]);
-            }
+                // This is safe as this is a copy of the original weights and dropout weights are not used later
+                dropout_weights.inplace_transpose();
+                dropout_weights.inplace_remove_first_row();
 
-            gradients.push(gradient);
+                chain = (&*dropout_weights * &chain).entrywise_product(&self._deltas[num_layers - 2 - i]);
+            }
         }
 
         let unwrapped_momentums = momentums.clone().unwrap_or_else(|| {
@@ -202,7 +229,7 @@ impl NeuralNetwork {
         });
 
         let mut new_momentums = Vec::with_capacity(num_layers);
-        let weight_updates = self.layers.iter_mut().rev().zip(gradients.iter().zip(unwrapped_momentums.iter()));
+        let weight_updates = self.layers.iter_mut().rev().zip(self._gradients.iter().zip(unwrapped_momentums.iter()));
         for (layer, (gradient, momentum)) in weight_updates {
             let new_momentum = &(beta * momentum) + &gradient;
             layer.weights += &new_momentum * -alpha;
@@ -226,9 +253,14 @@ impl NeuralNetwork {
         let layers_with_dropout = self.layers.iter().zip(weights_with_dropout.iter()).enumerate();
         for (i, (layer, dropout_weights)) in layers_with_dropout {
             let layer_function = self.get_activation_function(layer);
-            let last_result_with_bias = self._predictions[i].add_constant_row(1_f32);
-            
-            MatrixHandle::multiply(&mut self._predictions[i + 1], dropout_weights, &last_result_with_bias);
+
+            self._predictions[i].inplace_add_constant_row(1_f32);
+            {
+                let (pred_split_1, pred_split_2) = self._predictions.split_at_mut(i + 1);
+                MatrixHandle::multiply(&mut pred_split_2[0], dropout_weights, &pred_split_1[i]);
+            }
+            self._predictions[i].inplace_remove_first_row();
+
             MatrixHandle::copy(&mut self._deltas[i], &self._predictions[i + 1]);
 
             layer_function.inline_evaluate(&mut self._predictions[i + 1]);

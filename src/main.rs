@@ -461,6 +461,23 @@ fn matrix_operations_gpu(b: &mut Bencher) {
 
 fn main() {
 
+    /*
+    let A = Matrix::new(10, 10, &|row, col| row as f32 * 10_f32 + col as f32);
+    let B = Matrix::new(10, 10, &|row, col| row as f32 * 10_f32 + col as f32);
+
+    println!("{}", &A * &B);
+
+    let A_handle = MatrixHandle::from_matrix(A);
+    let B_handle = MatrixHandle::from_matrix(B);
+
+    let mut R = MatrixHandle::of_size(10, 10);
+
+    MatrixHandle::multiply(&mut R, &A_handle, &B_handle);
+
+    println!("{}", MatrixHandle::to_matrix(&R));
+
+    return; */
+
     initialize_rayon_thread_pool();
 
     let game_description = GameDescription::FourInARow;
