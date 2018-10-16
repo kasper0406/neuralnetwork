@@ -53,7 +53,11 @@ pub struct NeuralNetwork {
     // #[serde(skip_serializing, skip_deserializing)]
     _weights: Vec<MatrixHandle>,
     // #[serde(skip_serializing, skip_deserializing)]
-    _momentums: Vec<MatrixHandle>
+    _momentums: Vec<MatrixHandle>,
+
+    // #[serde(skip_serializing, skip_deserializing)]
+    // TODO(knielsen): Consider not making this a vec to save some space. But probably doesn't matter
+    _chain: Vec<MatrixHandle>
 }
 
 #[derive(Clone, Copy)]
@@ -89,6 +93,8 @@ impl NeuralNetwork {
         let mut _gradients = Vec::with_capacity(layers.len());
         let mut _weights = Vec::with_capacity(layers.len());
         let mut _momentums = Vec::with_capacity(layers.len());
+        let mut _chain = Vec::with_capacity(layers.len());
+
         for i in 0 .. layers.len() {
             _predictions.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
             _deltas.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
@@ -99,6 +105,8 @@ impl NeuralNetwork {
             _momentums.push(MatrixHandle::from_matrix(
                 Matrix::new(layers[i].weights.rows(), layers[i].weights.columns(), &|_, _| 0_f32)
             ));
+            _chain.push(MatrixHandle::of_size(layers[layers.len() - i - 1].weights.columns(),
+                                              MAX_INPUT_COLUMNS));
         }
 
         return NeuralNetwork {
@@ -110,7 +118,8 @@ impl NeuralNetwork {
             _deltas: _deltas,
             _gradients: _gradients,
             _weights: _weights,
-            _momentums: _momentums
+            _momentums: _momentums,
+            _chain: _chain
         }
     }
 
@@ -203,10 +212,13 @@ impl NeuralNetwork {
 
         let num_layers = self.layers.len();
 
-        let mut chain = {
+        // Setup chain
+        {
             let prediction = self._predictions.last().unwrap();
-            (prediction - expected).entrywise_product(self._deltas.last().unwrap())
-        };
+            MatrixHandle::copy(&mut self._chain[0], &prediction);
+            self._chain[0] -= expected;
+            self._chain[0].inplace_entrywise_product(&self._deltas.last().unwrap());
+        }
 
         for i in 0 .. self._weights.len() {
 
@@ -215,7 +227,7 @@ impl NeuralNetwork {
             self._predictions[num_layers - i - 1].inplace_add_constant_row(1_f32);
             self._predictions[num_layers - i - 1].inplace_transpose();
 
-            MatrixHandle::multiply(&mut self._gradients[i], &chain, &self._predictions[num_layers - i - 1]);
+            MatrixHandle::multiply(&mut self._gradients[i], &self._chain[i], &self._predictions[num_layers - i - 1]);
 
             // Clean up the operations
             // TODO(knielsen): Consider not doing the extra transpose. Instead just be nasty and modify the MatrixHandle struct directly
@@ -231,7 +243,11 @@ impl NeuralNetwork {
                 self._weights[num_layers - i - 1].inplace_transpose();
                 self._weights[num_layers - i - 1].inplace_remove_first_row();
 
-                chain = (&self._weights[num_layers - i - 1] * &chain).entrywise_product(&self._deltas[num_layers - 2 - i]);
+                {
+                    let (chain_split_1, chain_split_2) = self._chain.split_at_mut(i + 1);
+                    MatrixHandle::multiply(&mut chain_split_2[0], &self._weights[num_layers - i - 1], &chain_split_1[i]);
+                }
+                self._chain[i + 1].inplace_entrywise_product(&self._deltas[num_layers - 2 - i]);
             }
         }
 

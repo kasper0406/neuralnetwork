@@ -1,6 +1,6 @@
 use serde::{ Deserializer, Deserialize, Serializer, Serialize };
 use matrix::Matrix;
-use std::ops::{Add, AddAssign, Sub, Mul};
+use std::ops::{Add, AddAssign, Sub, SubAssign, Mul};
 use std::ptr;
 
 #[repr(C)]
@@ -43,9 +43,15 @@ extern {
                   handle_b: *const MatrixHandle,
                   handle_result: *mut MatrixHandle) -> libc::c_int;
 
+    fn matrix_sub_assign(handle_a: *mut MatrixHandle,
+                         handle_b: *const MatrixHandle) -> libc::c_int;
+
     fn matrix_entrywise_multiply(handle_a: *const MatrixHandle,
                                  handle_b: *const MatrixHandle,
                                  handle_result: *mut MatrixHandle) -> libc::c_int;
+
+    fn matrix_inplace_entrywise_multiply(handle_a: *mut MatrixHandle,
+                                         handle_b: *const MatrixHandle) -> libc::c_int;
 
     fn matrix_scalar_multiply(handle_a: *const MatrixHandle,
                               scalar: libc::c_float,
@@ -181,6 +187,16 @@ impl MatrixHandle {
             panic!("Failed to entrywise-product matrices!");
         }
         return result_handle;
+    }
+
+    pub fn inplace_entrywise_product(&mut self, rhs: &MatrixHandle) {
+        let add_assign_result = unsafe {
+            matrix_inplace_entrywise_multiply(self as *mut MatrixHandle,
+                                              rhs as *const MatrixHandle)
+        };
+        if add_assign_result != 0 {
+            panic!("Failed to inplace entrywise product!");
+        }
     }
 
     pub fn transpose(&self) -> MatrixHandle {
@@ -338,6 +354,18 @@ impl<'a> Sub for &'a MatrixHandle {
             panic!("Failed to subtract matrices!");
         }
         return result_handle;
+    }
+}
+
+impl<'a> SubAssign<&'a MatrixHandle> for MatrixHandle {
+    fn sub_assign(&mut self, rhs: &MatrixHandle) {
+        let add_assign_result = unsafe {
+            matrix_sub_assign(self as *mut MatrixHandle,
+                              rhs as *const MatrixHandle)
+        };
+        if add_assign_result != 0 {
+            panic!("Failed to add assign matrices!");
+        }
     }
 }
 
