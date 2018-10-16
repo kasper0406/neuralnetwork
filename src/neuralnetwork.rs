@@ -96,8 +96,8 @@ impl NeuralNetwork {
         let mut _chain = Vec::with_capacity(layers.len());
 
         for i in 0 .. layers.len() {
-            _predictions.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
-            _deltas.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
+            _predictions.push(MatrixHandle::of_size(layers[i].weights.rows(), MAX_INPUT_COLUMNS));
+            _deltas.push(MatrixHandle::of_size(layers[i].weights.rows(), MAX_INPUT_COLUMNS));
             _gradients.push(MatrixHandle::of_size(layers[layers.len() - i - 1].weights.rows(),
                                                   layers[layers.len() - i - 1].weights.columns()));
             _weights.push(MatrixHandle::of_size(layers[i].weights.rows(),
