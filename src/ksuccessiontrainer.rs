@@ -70,7 +70,6 @@ pub trait TrainableAgent: Agent {
 #[derive(Serialize, Deserialize)]
 pub struct NeuralNetworkAgent {
     value_net: NeuralNetwork,
-    momentums: Option<Vec<MatrixHandle>>,
     game_description: GameDescription,
     exploration_rate: f64,
     verbose: bool
@@ -80,7 +79,6 @@ impl NeuralNetworkAgent {
     pub fn new(game_description: GameDescription, value_net: NeuralNetwork, exploration_rate: f64) -> NeuralNetworkAgent {
         NeuralNetworkAgent {
             value_net: value_net,
-            momentums: None,
             game_description: game_description,
             exploration_rate: exploration_rate,
             verbose: false
@@ -197,7 +195,7 @@ impl TrainableAgent for NeuralNetworkAgent {
 
         let alpha = 0.002_f32;
         let beta = 0.90_f32;
-        self.momentums = Some(self.value_net.train(&game_configs, &expect, alpha, beta, &self.momentums));
+        self.value_net.train(&game_configs, &expect, alpha, beta);
 
         return self.value_net.error(&game_configs, &expect) as f64;
     }

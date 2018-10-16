@@ -35,7 +35,7 @@ pub enum Regulizer {
     WeightPeanalizer(f32)
 }
 
-const MAX_INPUT_COLUMNS: usize = 10000;
+const MAX_INPUT_COLUMNS: usize = 1000;
 
 #[derive(Serialize, Deserialize)]
 pub struct NeuralNetwork {
@@ -49,7 +49,11 @@ pub struct NeuralNetwork {
     // #[serde(skip_serializing, skip_deserializing)]
     _deltas: Vec<MatrixHandle>,
     // #[serde(skip_serializing, skip_deserializing)]
-    _gradients: Vec<MatrixHandle>
+    _gradients: Vec<MatrixHandle>,
+    // #[serde(skip_serializing, skip_deserializing)]
+    _weights: Vec<MatrixHandle>,
+    // #[serde(skip_serializing, skip_deserializing)]
+    _momentums: Vec<MatrixHandle>
 }
 
 #[derive(Clone, Copy)]
@@ -83,11 +87,18 @@ impl NeuralNetwork {
 
         let mut _deltas = Vec::with_capacity(layers.len());
         let mut _gradients = Vec::with_capacity(layers.len());
+        let mut _weights = Vec::with_capacity(layers.len());
+        let mut _momentums = Vec::with_capacity(layers.len());
         for i in 0 .. layers.len() {
             _predictions.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
             _deltas.push(MatrixHandle::of_size(layers[i].weights.columns(), MAX_INPUT_COLUMNS));
             _gradients.push(MatrixHandle::of_size(layers[layers.len() - i - 1].weights.rows(),
                                                   layers[layers.len() - i - 1].weights.columns()));
+            _weights.push(MatrixHandle::of_size(layers[i].weights.rows(),
+                                                layers[i].weights.columns()));
+            _momentums.push(MatrixHandle::from_matrix(
+                Matrix::new(layers[i].weights.rows(), layers[i].weights.columns(), &|_, _| 0_f32)
+            ));
         }
 
         return NeuralNetwork {
@@ -97,7 +108,9 @@ impl NeuralNetwork {
 
             _predictions: _predictions,
             _deltas: _deltas,
-            _gradients: _gradients
+            _gradients: _gradients,
+            _weights: _weights,
+            _momentums: _momentums
         }
     }
 
@@ -147,21 +160,25 @@ impl NeuralNetwork {
         return (error / expected.columns() as f64) as f32;
     }
 
-    fn compute_weights_with_dropouts(&self) -> Vec<MatrixHandle> {
-        return self.layers.iter().enumerate().map(|(i, layer)| {
+    fn compute_weights_with_dropouts(&mut self) {
+        for (i, layer) in self.layers.iter().enumerate() {
             match self.dropout {
-                DropoutType::None => return layer.weights.clone(),
-                DropoutType::Weight(rate) => return layer.weights.dropout_elements(rate),
+                DropoutType::None => MatrixHandle::copy(&mut self._weights[i], &layer.weights),
+                DropoutType::Weight(rate) => {
+                    // TODO(knielsen): Avoid one allocation by doing dropout_elements inplace on the copy
+                    MatrixHandle::copy(&mut self._weights[i], &layer.weights.dropout_elements(rate));
+                },
                 DropoutType::Neuron(rate) => {
                     if i == self.layers.len() - 1 {
                         // Do not drop out result neurons
-                        return layer.weights.clone();
+                        MatrixHandle::copy(&mut self._weights[i], &layer.weights);
                     } else {
-                        return layer.weights.dropout_rows(rate);
+                        // TODO(knielsen): Avoid one allocation by doing dropout_rows inplace on the copy
+                        MatrixHandle::copy(&mut self._weights[i], &layer.weights.dropout_rows(rate));
                     }
                 }
             }
-        }).collect();
+        }
     }
 
     fn get_regulizer_penalty(&self, weights: &MatrixHandle) -> MatrixHandle {
@@ -171,18 +188,18 @@ impl NeuralNetwork {
         }
     }
 
-    pub fn train(&mut self, input: &MatrixHandle, expected: &MatrixHandle, alpha: f32, beta: f32, momentums: &Option<Vec<MatrixHandle>>) -> Vec<MatrixHandle> {
+    pub fn train(&mut self, input: &MatrixHandle, expected: &MatrixHandle, alpha: f32, beta: f32) {
         if input.columns() > MAX_INPUT_COLUMNS {
             // TODO(knielsen): Split the inputs such that memory on the GPU can be allocated up front
             panic!("Splitting not yet implemented!");
         } else {
-            return self.internal_train(input, expected, alpha, beta, momentums);
+            return self.internal_train(input, expected, alpha, beta);
         }
     }
 
-    fn internal_train(&mut self, input: &MatrixHandle, expected: &MatrixHandle, alpha: f32, beta: f32, momentums: &Option<Vec<MatrixHandle>>) -> Vec<MatrixHandle> {
-        let mut weights_with_dropout = self.compute_weights_with_dropouts();
-        self.predict_for_training(input, &weights_with_dropout);
+    fn internal_train(&mut self, input: &MatrixHandle, expected: &MatrixHandle, alpha: f32, beta: f32) {
+        self.compute_weights_with_dropouts();
+        self.predict_for_training(input);
 
         let num_layers = self.layers.len();
 
@@ -191,7 +208,7 @@ impl NeuralNetwork {
             (prediction - expected).entrywise_product(self._deltas.last().unwrap())
         };
 
-        for (i, dropout_weights) in weights_with_dropout.iter_mut().rev().enumerate() {
+        for i in 0 .. self._weights.len() {
 
             // self._predictions[num_layers - i - 1] are not used for anything after this.
             // Therefore we can go crazy with side effects to do less GPU memory allocation
@@ -206,37 +223,27 @@ impl NeuralNetwork {
             self._predictions[num_layers - i - 1].inplace_remove_first_row();
 
             if self.regulizer.is_some() {
-                self._gradients[i] += self.get_regulizer_penalty(&dropout_weights);
+                self._gradients[i] += self.get_regulizer_penalty(&self._weights[num_layers - i - 1]);
             }
 
             if i < num_layers - 1 {
                 // This is safe as this is a copy of the original weights and dropout weights are not used later
-                dropout_weights.inplace_transpose();
-                dropout_weights.inplace_remove_first_row();
+                self._weights[num_layers - i - 1].inplace_transpose();
+                self._weights[num_layers - i - 1].inplace_remove_first_row();
 
-                chain = (&*dropout_weights * &chain).entrywise_product(&self._deltas[num_layers - 2 - i]);
+                chain = (&self._weights[num_layers - i - 1] * &chain).entrywise_product(&self._deltas[num_layers - 2 - i]);
             }
         }
 
-        let unwrapped_momentums = momentums.clone().unwrap_or_else(|| {
-            let mut ms = Vec::with_capacity(self.layers.len());
-            for layer in self.layers.iter().rev() {
-                ms.push(MatrixHandle::from_matrix(
-                    Matrix::new(layer.weights.rows(), layer.weights.columns(), &|row, col| 0_f32))
-                );
-            }
-            return ms;
-        });
-
-        let mut new_momentums = Vec::with_capacity(num_layers);
-        let weight_updates = self.layers.iter_mut().rev().zip(self._gradients.iter().zip(unwrapped_momentums.iter()));
-        for (layer, (gradient, momentum)) in weight_updates {
-            let new_momentum = &(beta * momentum) + &gradient;
-            layer.weights += &new_momentum * -alpha;
-            new_momentums.push(new_momentum);
+        let weight_updates = self.layers.iter_mut().zip(self._gradients.iter().rev());
+        for (i, (layer, gradient)) in weight_updates.enumerate() {
+            self._momentums[i].inplace_scalar_multiply(beta);
+            self._momentums[i] += gradient;
+            // self._weights[i] are not used anymore after this. We misuse it for operating on the momentums
+            MatrixHandle::copy(&mut self._weights[i], &self._momentums[i]);
+            self._weights[i].inplace_scalar_multiply(-alpha);
+            layer.weights += &self._weights[i];
         }
-
-        return new_momentums;
     }
 
     fn get_activation_function(&self, layer: &Layer) -> Box<ActivationFunction<MatrixHandle>> {
@@ -247,10 +254,10 @@ impl NeuralNetwork {
         }
     }
 
-    fn predict_for_training(&mut self, input: &MatrixHandle, weights_with_dropout: &Vec<MatrixHandle>) {
+    fn predict_for_training(&mut self, input: &MatrixHandle) {
         MatrixHandle::copy(&mut self._predictions[0], input);
 
-        let layers_with_dropout = self.layers.iter().zip(weights_with_dropout.iter()).enumerate();
+        let layers_with_dropout = self.layers.iter().zip(self._weights.iter()).enumerate();
         for (i, (layer, dropout_weights)) in layers_with_dropout {
             let layer_function = self.get_activation_function(layer);
 

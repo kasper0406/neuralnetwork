@@ -204,6 +204,17 @@ impl MatrixHandle {
         }
     }
 
+    pub fn inplace_scalar_multiply(&mut self, scalar: f32) {
+        let result = unsafe {
+            matrix_scalar_multiply(self as *const MatrixHandle,
+                                   scalar,
+                                   self as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to inplace scalar multiply");
+        }
+    }
+
     pub fn add_constant_row(&self, padding: f32) -> MatrixHandle {
         let mut result_handle = MatrixHandle::empty();
         let result = unsafe {
@@ -294,6 +305,18 @@ impl AddAssign for MatrixHandle {
         let add_assign_result = unsafe {
             matrix_add_assign(self as *mut MatrixHandle,
                               &rhs as *const MatrixHandle)
+        };
+        if add_assign_result != 0 {
+            panic!("Failed to add assign matrices!");
+        }
+    }
+}
+
+impl<'a> AddAssign<&'a MatrixHandle> for MatrixHandle {
+    fn add_assign(&mut self, rhs: &MatrixHandle) {
+        let add_assign_result = unsafe {
+            matrix_add_assign(self as *mut MatrixHandle,
+                              rhs as *const MatrixHandle)
         };
         if add_assign_result != 0 {
             panic!("Failed to add assign matrices!");
