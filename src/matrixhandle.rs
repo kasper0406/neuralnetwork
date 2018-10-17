@@ -129,6 +129,18 @@ impl MatrixHandle {
         return handle;
     }
 
+    pub fn copy_from_matrix(dst: &mut MatrixHandle, matrix: Matrix<f32>) {
+        let result = unsafe {
+            matrix_alloc(matrix.rows(),
+                         matrix.columns(),
+                         matrix.raw_values().as_ptr(),
+                         dst as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to copy from matrix: {}", result);
+        }
+    }
+
     pub fn to_matrix(handle: &MatrixHandle) -> Matrix<f32> {
         MatrixHandle::synchronize(true);
 

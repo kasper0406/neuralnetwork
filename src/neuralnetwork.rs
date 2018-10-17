@@ -105,7 +105,7 @@ impl NeuralNetwork {
             _momentums.push(MatrixHandle::from_matrix(
                 Matrix::new(layers[i].weights.rows(), layers[i].weights.columns(), &|_, _| 0_f32)
             ));
-            _chain.push(MatrixHandle::of_size(layers[layers.len() - i - 1].weights.columns(),
+            _chain.push(MatrixHandle::of_size(layers[layers.len() - i - 1].weights.rows(),
                                               MAX_INPUT_COLUMNS));
         }
 

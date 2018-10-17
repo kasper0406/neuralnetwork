@@ -54,8 +54,8 @@ impl GameTrace {
         return &self.actions;
     }
 
-    pub fn get_winner(&self) -> &Option<Color> {
-        return &self.winner;
+    pub fn get_winner(&self) -> Option<Color> {
+        return self.winner;
     }
 }
 
@@ -72,7 +72,10 @@ pub struct NeuralNetworkAgent {
     value_net: NeuralNetwork,
     game_description: GameDescription,
     exploration_rate: f64,
-    verbose: bool
+    verbose: bool,
+
+    _nn_config_cache: MatrixHandle,
+    _expect: MatrixHandle
 }
 
 impl NeuralNetworkAgent {
@@ -81,7 +84,10 @@ impl NeuralNetworkAgent {
             value_net: value_net,
             game_description: game_description,
             exploration_rate: exploration_rate,
-            verbose: false
+            verbose: false,
+
+            _nn_config_cache: MatrixHandle::of_size(0, 0),
+            _expect: MatrixHandle::of_size(1000, 1)
         }
     }
 
@@ -93,15 +99,22 @@ impl NeuralNetworkAgent {
         self.verbose = verbose;
     }
 
-    fn to_nn_config(games: &[KSuccession]) -> MatrixHandle {
-        return MatrixHandle::from_matrix(
-            Matrix::new(games[0].get_rows() * games[0].get_columns(), games.len(), &|row, col| {
-                match games[col].get_board()[row] {
-                    Some(player) => KSuccessionTrainer::player_value(player),
-                    None => 0_f32
-                }
-            })
-        );
+    fn to_nn_config(&mut self, games: &[KSuccession]) -> &MatrixHandle {
+        let rows = games[0].get_rows() * games[0].get_columns();
+        let columns = games.len();
+
+        if self._nn_config_cache.rows() * self._nn_config_cache.columns() < rows * columns {
+            self._nn_config_cache = MatrixHandle::of_size(rows, columns);
+        }
+
+        MatrixHandle::copy_from_matrix(&mut self._nn_config_cache, Matrix::new(rows, columns, &|row, col| {
+            match games[col].get_board()[row] {
+                Some(player) => KSuccessionTrainer::player_value(player),
+                None => 0_f32
+            }
+        }));
+
+        return &self._nn_config_cache;
     }
 
     fn get_best_action(&mut self, game: &KSuccession) -> Option<(usize, f32)> {
@@ -117,8 +130,10 @@ impl NeuralNetworkAgent {
                 }
             }
         }
+
+        self.to_nn_config(&possible_games);
         let predictions = MatrixHandle::to_matrix(&self.value_net.predict(
-            &NeuralNetworkAgent::to_nn_config(&possible_games)
+            &self._nn_config_cache
         ));
 
         let player_modifier = KSuccessionTrainer::player_value(game.get_current_player());
@@ -190,14 +205,16 @@ impl TrainableAgent for NeuralNetworkAgent {
             }
         }
 
-        let game_configs = NeuralNetworkAgent::to_nn_config(&games);
-        let expect = MatrixHandle::from_matrix(Matrix::new(1, expectations.len(), &|_, col| expectations[col]));
+        // let game_configs = { self.to_nn_config(&games) };
+        self.to_nn_config(&games);
+        // let expect = MatrixHandle::from_matrix(Matrix::new(1, expectations.len(), &|_, col| expectations[col]));
+        MatrixHandle::copy_from_matrix(&mut self._expect, Matrix::new(1, expectations.len(), &|_, col| expectations[col]));
 
         let alpha = 0.002_f32;
         let beta = 0.90_f32;
-        self.value_net.train(&game_configs, &expect, alpha, beta);
+        self.value_net.train(&self._nn_config_cache, &self._expect, alpha, beta);
 
-        return self.value_net.error(&game_configs, &expect) as f64;
+        return self.value_net.error(&self._nn_config_cache, &self._expect) as f64;
     }
 }
 
