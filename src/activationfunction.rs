@@ -1,22 +1,24 @@
+use simplematrixhandle::SimpleMatrixHandle;
 use matrix::Matrix;
 use matrixhandle::MatrixHandle;
 
+#[cfg(matrixlib)]
 #[link(name = "matrix", kind = "static")]
 extern {
-    fn matrix_apply_sigmoid(handle_a: *const MatrixHandle,
-                            handle_result: *mut MatrixHandle) -> libc::c_int;
-    fn matrix_apply_sigmoid_derivative(handle_a: *const MatrixHandle,
-                                       handle_result: *mut MatrixHandle) -> libc::c_int;
+    fn matrix_apply_sigmoid(handle_a: *const LibMatrixHandle,
+                            handle_result: *mut LibMatrixHandle) -> libc::c_int;
+    fn matrix_apply_sigmoid_derivative(handle_a: *const LibMatrixHandle,
+                                       handle_result: *mut LibMatrixHandle) -> libc::c_int;
     
-    fn matrix_apply_relu(handle_a: *const MatrixHandle,
-                         handle_result: *mut MatrixHandle) -> libc::c_int;
-    fn matrix_apply_relu_derivative(handle_a: *const MatrixHandle,
-                                    handle_result: *mut MatrixHandle) -> libc::c_int;
+    fn matrix_apply_relu(handle_a: *const LibMatrixHandle,
+                         handle_result: *mut LibMatrixHandle) -> libc::c_int;
+    fn matrix_apply_relu_derivative(handle_a: *const LibMatrixHandle,
+                                    handle_result: *mut LibMatrixHandle) -> libc::c_int;
     
-    fn matrix_apply_twoplayerscore(handle_a: *const MatrixHandle,
-                                   handle_result: *mut MatrixHandle) -> libc::c_int;
-    fn matrix_apply_twoplayerscore_derivative(handle_a: *const MatrixHandle,
-                                              handle_result: *mut MatrixHandle) -> libc::c_int;
+    fn matrix_apply_twoplayerscore(handle_a: *const LibMatrixHandle,
+                                   handle_result: *mut LibMatrixHandle) -> libc::c_int;
+    fn matrix_apply_twoplayerscore_derivative(handle_a: *const LibMatrixHandle,
+                                              handle_result: *mut LibMatrixHandle) -> libc::c_int;
 }
 
 pub trait ActivationFunction<T>: Send + Sync {
@@ -27,38 +29,38 @@ pub trait ActivationFunction<T>: Send + Sync {
 }
 
 pub struct Sigmoid;
-impl ActivationFunction<f64> for Sigmoid {
-    fn evaluate(&self, x: &f64) -> f64 {
-        return x.exp() / (x.exp() + 1_f64);
+impl ActivationFunction<f32> for Sigmoid {
+    fn evaluate(&self, x: &f32) -> f32 {
+        return x.exp() / (x.exp() + 1_f32);
     }
 
-    fn derivative(&self, x: &f64) -> f64 {
-        return x.exp() / (x.exp() + 1_f64).powi(2);
+    fn derivative(&self, x: &f32) -> f32 {
+        return x.exp() / (x.exp() + 1_f32).powi(2);
     }
 
-    fn inline_evaluate(&self, x: &mut f64) {
+    fn inline_evaluate(&self, x: &mut f32) {
         *x = self.evaluate(&x);
     }
 
-    fn inline_derivative(&self, x: &mut f64) {
+    fn inline_derivative(&self, x: &mut f32) {
         *x = self.derivative(&x);
     }
 }
 
-impl ActivationFunction<Matrix<f64>> for Sigmoid {
-    fn evaluate(&self, input: &Matrix<f64>) -> Matrix<f64> {
+impl ActivationFunction<Matrix<f32>> for Sigmoid {
+    fn evaluate(&self, input: &Matrix<f32>) -> Matrix<f32> {
         return Matrix::new(input.rows(), input.columns(), &|row, column| {
             return self.evaluate(&input[(row, column)]);
         });
     }
 
-    fn derivative(&self, input: &Matrix<f64>) -> Matrix<f64> {
+    fn derivative(&self, input: &Matrix<f32>) -> Matrix<f32> {
         return Matrix::new(input.rows(), input.columns(), &|row, column| {
             return self.derivative(&input[(row, column)]);
         });
     }
     
-    fn inline_evaluate(&self, input: &mut Matrix<f64>) {
+    fn inline_evaluate(&self, input: &mut Matrix<f32>) {
         for row in 0 .. input.rows() {
             for column in 0 .. input.columns() {
                 input[(row, column)] = self.evaluate(&input[(row, column)]);
@@ -66,7 +68,7 @@ impl ActivationFunction<Matrix<f64>> for Sigmoid {
         }
     }
 
-    fn inline_derivative(&self, input: &mut Matrix<f64>) {
+    fn inline_derivative(&self, input: &mut Matrix<f32>) {
         for row in 0 .. input.rows() {
             for column in 0 .. input.columns() {
                 input[(row, column)] = self.derivative(&input[(row, column)]);
@@ -75,6 +77,25 @@ impl ActivationFunction<Matrix<f64>> for Sigmoid {
     }
 }
 
+impl ActivationFunction<SimpleMatrixHandle> for Sigmoid {
+    fn evaluate(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn derivative(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(self.derivative(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn inline_evaluate(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+#[cfg(matrixlib)]
 impl ActivationFunction<MatrixHandle> for Sigmoid {
     fn evaluate(&self, input: &MatrixHandle) -> MatrixHandle {
         let mut result_handle = MatrixHandle::empty();
@@ -123,38 +144,38 @@ impl ActivationFunction<MatrixHandle> for Sigmoid {
 }
 
 pub struct Relu;
-impl ActivationFunction<f64> for Relu {
-    fn evaluate(&self, x: &f64) -> f64 {
-        return if *x < 0_f64 { 0_f64 } else { *x };
+impl ActivationFunction<f32> for Relu {
+    fn evaluate(&self, x: &f32) -> f32 {
+        return if *x < 0_f32 { 0_f32 } else { *x };
     }
 
-    fn derivative(&self, x: &f64) -> f64 {
-        return if *x < 0_f64 { 0_f64 } else { 1_f64 };
+    fn derivative(&self, x: &f32) -> f32 {
+        return if *x < 0_f32 { 0_f32 } else { 1_f32 };
     }
     
-    fn inline_evaluate(&self, x: &mut f64) {
+    fn inline_evaluate(&self, x: &mut f32) {
         *x = self.evaluate(&x);
     }
 
-    fn inline_derivative(&self, x: &mut f64) {
+    fn inline_derivative(&self, x: &mut f32) {
         *x = self.derivative(&x);
     }
 }
 
-impl ActivationFunction<Matrix<f64>> for Relu {
-    fn evaluate(&self, input: &Matrix<f64>) -> Matrix<f64> {
+impl ActivationFunction<Matrix<f32>> for Relu {
+    fn evaluate(&self, input: &Matrix<f32>) -> Matrix<f32> {
         return Matrix::new(input.rows(), input.columns(), &|row, column| {
             return self.evaluate(&input[(row, column)]);
         });
     }
 
-    fn derivative(&self, input: &Matrix<f64>) -> Matrix<f64> {
+    fn derivative(&self, input: &Matrix<f32>) -> Matrix<f32> {
         return Matrix::new(input.rows(), input.columns(), &|row, column| {
             return self.derivative(&input[(row, column)]);
         });
     }
 
-    fn inline_evaluate(&self, input: &mut Matrix<f64>) {
+    fn inline_evaluate(&self, input: &mut Matrix<f32>) {
         for row in 0 .. input.rows() {
             for column in 0 .. input.columns() {
                 input[(row, column)] = self.evaluate(&input[(row, column)]);
@@ -162,7 +183,7 @@ impl ActivationFunction<Matrix<f64>> for Relu {
         }
     }
 
-    fn inline_derivative(&self, input: &mut Matrix<f64>) {
+    fn inline_derivative(&self, input: &mut Matrix<f32>) {
         for row in 0 .. input.rows() {
             for column in 0 .. input.columns() {
                 input[(row, column)] = self.derivative(&input[(row, column)]);
@@ -171,6 +192,25 @@ impl ActivationFunction<Matrix<f64>> for Relu {
     }
 }
 
+impl ActivationFunction<SimpleMatrixHandle> for Relu {
+    fn evaluate(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn derivative(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(self.derivative(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn inline_evaluate(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+#[cfg(matrixlib)]
 impl ActivationFunction<MatrixHandle> for Relu {
     fn evaluate(&self, input: &MatrixHandle) -> MatrixHandle {
         let mut result_handle = MatrixHandle::empty();
@@ -219,38 +259,38 @@ impl ActivationFunction<MatrixHandle> for Relu {
 }
 
 pub struct TwoPlayerScore;
-impl ActivationFunction<f64> for TwoPlayerScore {
-    fn evaluate(&self, x: &f64) -> f64 {
-        return (x.exp() - 1_f64) / (x.exp() + 1_f64);
+impl ActivationFunction<f32> for TwoPlayerScore {
+    fn evaluate(&self, x: &f32) -> f32 {
+        return (x.exp() - 1_f32) / (x.exp() + 1_f32);
     }
 
-    fn derivative(&self, x: &f64) -> f64 {
-        return 2_f64 * x.exp() / (x.exp() + 1_f64).powi(2);
+    fn derivative(&self, x: &f32) -> f32 {
+        return 2_f32 * x.exp() / (x.exp() + 1_f32).powi(2);
     }
 
-    fn inline_evaluate(&self, x: &mut f64) {
+    fn inline_evaluate(&self, x: &mut f32) {
         *x = self.evaluate(&x);
     }
 
-    fn inline_derivative(&self, x: &mut f64) {
+    fn inline_derivative(&self, x: &mut f32) {
         *x = self.derivative(&x);
     }
 }
 
-impl ActivationFunction<Matrix<f64>> for TwoPlayerScore {
-    fn evaluate(&self, input: &Matrix<f64>) -> Matrix<f64> {
+impl ActivationFunction<Matrix<f32>> for TwoPlayerScore {
+    fn evaluate(&self, input: &Matrix<f32>) -> Matrix<f32> {
         return Matrix::new(input.rows(), input.columns(), &|row, column| {
             return self.evaluate(&input[(row, column)]);
         });
     }
 
-    fn derivative(&self, input: &Matrix<f64>) -> Matrix<f64> {
+    fn derivative(&self, input: &Matrix<f32>) -> Matrix<f32> {
         return Matrix::new(input.rows(), input.columns(), &|row, column| {
             return self.derivative(&input[(row, column)]);
         });
     }
 
-    fn inline_evaluate(&self, input: &mut Matrix<f64>) {
+    fn inline_evaluate(&self, input: &mut Matrix<f32>) {
         for row in 0 .. input.rows() {
             for column in 0 .. input.columns() {
                 input[(row, column)] = self.evaluate(&input[(row, column)]);
@@ -258,7 +298,7 @@ impl ActivationFunction<Matrix<f64>> for TwoPlayerScore {
         }
     }
 
-    fn inline_derivative(&self, input: &mut Matrix<f64>) {
+    fn inline_derivative(&self, input: &mut Matrix<f32>) {
         for row in 0 .. input.rows() {
             for column in 0 .. input.columns() {
                 input[(row, column)] = self.derivative(&input[(row, column)]);
@@ -267,6 +307,25 @@ impl ActivationFunction<Matrix<f64>> for TwoPlayerScore {
     }
 }
 
+impl ActivationFunction<SimpleMatrixHandle> for TwoPlayerScore {
+    fn evaluate(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn derivative(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(self.derivative(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn inline_evaluate(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+#[cfg(matrixlib)]
 impl ActivationFunction<MatrixHandle> for TwoPlayerScore {
     fn evaluate(&self, input: &MatrixHandle) -> MatrixHandle {
         let mut result_handle = MatrixHandle::empty();

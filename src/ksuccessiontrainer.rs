@@ -2,13 +2,12 @@ extern crate rand;
 
 use matrixhandle::MatrixHandle;
 use ksuccession::{ KSuccession, Color };
-use neuralnetwork::{ NeuralNetwork, LayerDescription };
+use neuralnetwork::NeuralNetwork;
 use matrix::Matrix;
 use rand::{thread_rng, Rng};
 use rand::distributions::Uniform;
 use std::iter::Iterator;
 use std::io;
-use std::slice;
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
 pub enum GameDescription {
@@ -67,27 +66,32 @@ pub trait TrainableAgent: Agent {
     fn train(&mut self, traces: &[(Color, GameTrace)], discount_factor: f64) -> f64;
 }
 
+// TODO(knielsen): Factor this out to a specific inplace impl
 #[derive(Serialize, Deserialize)]
-pub struct NeuralNetworkAgent {
-    value_net: NeuralNetwork,
+pub struct NeuralNetworkAgent<MH: MatrixHandle, NN: NeuralNetwork<MH>> {
+    value_net: NN,
     game_description: GameDescription,
     exploration_rate: f64,
     verbose: bool,
 
-    _nn_config_cache: MatrixHandle,
-    _expect: MatrixHandle
+    training_momentums: Option<Vec<MH>>,
+
+    _nn_config_cache: MH,
+    _expect: MH
 }
 
-impl NeuralNetworkAgent {
-    pub fn new(game_description: GameDescription, value_net: NeuralNetwork, exploration_rate: f64) -> NeuralNetworkAgent {
+impl<MH: MatrixHandle, NN: NeuralNetwork<MH>> NeuralNetworkAgent<MH, NN> {
+    pub fn new(game_description: GameDescription, value_net: NN, exploration_rate: f64) -> NeuralNetworkAgent<MH, NN> {
         NeuralNetworkAgent {
             value_net: value_net,
             game_description: game_description,
             exploration_rate: exploration_rate,
             verbose: false,
 
-            _nn_config_cache: MatrixHandle::of_size(0, 0),
-            _expect: MatrixHandle::of_size(1000, 1)
+            training_momentums: Option::None,
+
+            _nn_config_cache: MH::of_size(0, 0),
+            _expect: MH::of_size(1000, 1)
         }
     }
 
@@ -99,15 +103,15 @@ impl NeuralNetworkAgent {
         self.verbose = verbose;
     }
 
-    fn to_nn_config(&mut self, games: &[KSuccession]) -> &MatrixHandle {
+    fn to_nn_config(&mut self, games: &[KSuccession]) -> &MH {
         let rows = games[0].get_rows() * games[0].get_columns();
         let columns = games.len();
 
         if self._nn_config_cache.rows() * self._nn_config_cache.columns() < rows * columns {
-            self._nn_config_cache = MatrixHandle::of_size(rows, columns);
+            self._nn_config_cache = MH::of_size(rows, columns);
         }
 
-        MatrixHandle::copy_from_matrix(&mut self._nn_config_cache, Matrix::new(rows, columns, &|row, col| {
+        MH::copy_from_matrix(&mut self._nn_config_cache, Matrix::new(rows, columns, &|row, col| {
             match games[col].get_board()[row] {
                 Some(player) => KSuccessionTrainer::player_value(player),
                 None => 0_f32
@@ -132,7 +136,7 @@ impl NeuralNetworkAgent {
         }
 
         self.to_nn_config(&possible_games);
-        let predictions = MatrixHandle::to_matrix(&self.value_net.predict(
+        let predictions = MH::to_matrix(&self.value_net.predict(
             &self._nn_config_cache
         ));
 
@@ -167,7 +171,7 @@ impl NeuralNetworkAgent {
     }
 }
 
-impl TrainableAgent for NeuralNetworkAgent {
+impl<MH: MatrixHandle, NN: NeuralNetwork<MH>> TrainableAgent for NeuralNetworkAgent<MH, NN> {
     /**
      * Train the neural network return the average state error
      */
@@ -205,20 +209,19 @@ impl TrainableAgent for NeuralNetworkAgent {
             }
         }
 
-        // let game_configs = { self.to_nn_config(&games) };
         self.to_nn_config(&games);
-        // let expect = MatrixHandle::from_matrix(Matrix::new(1, expectations.len(), &|_, col| expectations[col]));
-        MatrixHandle::copy_from_matrix(&mut self._expect, Matrix::new(1, expectations.len(), &|_, col| expectations[col]));
+        MH::copy_from_matrix(&mut self._expect, Matrix::new(1, expectations.len(), &|_, col| expectations[col]));
 
         let alpha = 0.002_f32;
         let beta = 0.90_f32;
-        self.value_net.train(&self._nn_config_cache, &self._expect, alpha, beta);
+        self.training_momentums = Option::Some(
+            self.value_net.train(&self._nn_config_cache, &self._expect, alpha, beta, &self.training_momentums));
 
         return self.value_net.error(&self._nn_config_cache, &self._expect) as f64;
     }
 }
 
-impl Agent for NeuralNetworkAgent {
+impl<MH: MatrixHandle, NN: NeuralNetwork<MH>> Agent for NeuralNetworkAgent<MH, NN> {
     fn play(&mut self, game: &KSuccession) -> Action {
         let distr = Uniform::new(0_f64, 1_f64);
 
