@@ -1,5 +1,6 @@
 use matrix::Matrix;
-use rand::{thread_rng, Rng};
+use rand::thread_rng;
+use rand::seq::SliceRandom;
 use std::cell::UnsafeCell;
 
 use neuralnetwork::NeuralNetwork;
@@ -150,7 +151,7 @@ fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<A
         LayerDescription {
             num_neurons: 100_usize,
             function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
-        },
+        },*/
         LayerDescription {
             num_neurons: 160_usize,
             function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
@@ -158,7 +159,7 @@ fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<A
         LayerDescription {
             num_neurons: 80_usize,
             function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
-        },*/
+        },
         LayerDescription {
             num_neurons: 20_usize,
             function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
@@ -169,7 +170,7 @@ fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<A
         }
     ];
 
-    let num_agents = 2;
+    let num_agents = 4;
     let mut agents: Vec<UnsafeCell<Mutex<AgentType>>> = Vec::with_capacity(num_agents + 2);
 
     for i in 0..num_agents {
@@ -184,6 +185,8 @@ fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<A
 }
 
 fn battle_agents(batches: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeCell<Mutex<AgentType>>]) {
+    let mut rng = thread_rng();
+
     let lock_acquire_mutex = Arc::new(Mutex::new(0));
 
     let mut agent_battle_indexer: Vec<usize> = Vec::with_capacity(agents.len());
@@ -222,7 +225,7 @@ fn battle_agents(batches: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeC
 
         crossbeam::scope(|battle_scope| {
             for round in 0 .. rounds_per_batch {
-                thread_rng().shuffle(&mut agent_battle_indexer);
+                agent_battle_indexer.shuffle(&mut rng);
 
                 for (agent1_index_tmp, agent2_index_tmp) in agent_battle_indexer.iter().zip(0..agents.len()) {
                     let agent1_index = (*agent1_index_tmp).clone();

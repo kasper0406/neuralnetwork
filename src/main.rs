@@ -21,7 +21,10 @@ mod simplematrixhandle;
 mod ksuccession;
 mod ksuccessiontrainer;
 mod agentstats;
+mod digitclassifier;
 
 fn main() {
-    battler::start_battles(100);
+    // battler::start_battles(1000);
+
+    digitclassifier::test_digit_classification();
 }

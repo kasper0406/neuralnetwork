@@ -145,6 +145,10 @@ where
         let mut chain = (prediction - &expected).entrywise_product(deltas.last().unwrap());
         for (i, dropout_weights) in weights_with_dropout.iter().rev().enumerate() {
             let mut gradient = &chain * &predictions[num_layers - i - 1].add_constant_row(1_f32).transpose();
+            // Scale gradient to the number of training points, to make sure the gradient doesn't run crazy
+            // TODO(knielsen): Is linear scaling a good idea?
+            gradient = (1f32 / (chain.columns() as f32)) * &gradient;
+
             if self.regulizer.is_some() {
                 gradient += self.get_regulizer_penalty(&dropout_weights);
             }

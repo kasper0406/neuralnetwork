@@ -31,11 +31,29 @@ pub trait ActivationFunction<T>: Send + Sync {
 pub struct Sigmoid;
 impl ActivationFunction<f32> for Sigmoid {
     fn evaluate(&self, x: &f32) -> f32 {
-        return x.exp() / (x.exp() + 1_f32);
+        let exp = x.exp();
+        if exp.is_infinite() {
+            return 1f32;
+        }
+
+        let res = exp / (exp + 1_f32);
+        if cfg!(debug_assertions) && res.is_nan() {
+            panic!("Evaluated to NaN!");
+        }
+        return res;
     }
 
     fn derivative(&self, x: &f32) -> f32 {
-        return x.exp() / (x.exp() + 1_f32).powi(2);
+        let exp = x.exp();
+        if exp.is_infinite() {
+            return 0f32;
+        }
+
+        let res = exp / (exp + 1_f32).powi(2);
+        if cfg!(debug_assertions) && res.is_nan() {
+            panic!("Evaluated to NaN!");
+        }
+        return res;
     }
 
     fn inline_evaluate(&self, x: &mut f32) {
@@ -261,11 +279,29 @@ impl ActivationFunction<MatrixHandle> for Relu {
 pub struct TwoPlayerScore;
 impl ActivationFunction<f32> for TwoPlayerScore {
     fn evaluate(&self, x: &f32) -> f32 {
-        return (x.exp() - 1_f32) / (x.exp() + 1_f32);
+        let exp = x.exp();
+        if exp.is_infinite() {
+            return 1f32;
+        }
+
+        let res = (exp - 1_f32) / (exp + 1_f32);
+        if cfg!(debug_assertions) && res.is_nan() {
+            panic!("Evaluated to NaN!");
+        }
+        return res;
     }
 
     fn derivative(&self, x: &f32) -> f32 {
-        return 2_f32 * x.exp() / (x.exp() + 1_f32).powi(2);
+        let exp = x.exp();
+        if exp.is_infinite() {
+            return 0f32;
+        }
+
+        let res = 2_f32 * exp / (exp + 1_f32).powi(2);
+        if cfg!(debug_assertions) && res.is_nan() {
+            panic!("Evaluated to NaN!");
+        }
+        return res;
     }
 
     fn inline_evaluate(&self, x: &mut f32) {

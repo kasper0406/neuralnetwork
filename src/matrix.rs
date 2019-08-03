@@ -188,7 +188,7 @@ impl<'a, T: SubAssign + Copy> SubAssign<&'a Matrix<T>> for Matrix<T> {
     }
 }
 
-impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync> Mul for &'a Matrix<T> {
+impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync + num::Float + fmt::Display> Mul for &'a Matrix<T> {
     type Output = Matrix<T>;
 
     fn mul(self, rhs: &Matrix<T>) -> Matrix<T> {
@@ -212,11 +212,19 @@ impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Syn
                         let mut res: T = T::zero();
                         for k in 0..self.columns {
                             res += self[(row_num, k)] * rhs[(k, col_num)];
+                            
+                            if cfg!(debug_assertions) && res.is_nan() {
+                                let a = self[(row_num, k)];
+                                let b = rhs[(k, col_num)];
+
+                                panic!("Unexpected NaN multiplying: {} * {}", a, b);
+                            }
                         }
+
                         chunk[chunk_index] = res;
                     }
                 });
-        
+
         Matrix { rows: self.rows, columns: rhs.columns, values: values }
     }
 }
@@ -255,7 +263,7 @@ impl<'a> Mul<&'a Matrix<f32>> for f32 {
     }
 }
 
-impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync> Mul for Matrix<T> {
+impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync + num::Float + fmt::Display> Mul for Matrix<T> {
     type Output = Matrix<T>;
 
     fn mul(self, rhs: Matrix<T>) -> Matrix<T> {

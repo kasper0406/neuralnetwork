@@ -5,6 +5,7 @@ use ksuccession::{ KSuccession, Color };
 use neuralnetwork::NeuralNetwork;
 use matrix::Matrix;
 use rand::{thread_rng, Rng};
+use rand::seq::SliceRandom;
 use rand::distributions::Uniform;
 use std::iter::Iterator;
 use std::io;
@@ -167,7 +168,8 @@ impl<MH: MatrixHandle, NN: NeuralNetwork<MH>> NeuralNetworkAgent<MH, NN> {
                 actions.push(action);
             }
         }
-        return rand::thread_rng().choose(&actions).map(|val| (*val, None));
+        let mut rng = thread_rng();
+        return actions.choose(&mut rng).map(|val| (*val, None));
     }
 }
 
