@@ -44,9 +44,9 @@ fn construct_agent(game_description: GameDescription, layers: &[LayerDescription
     let sample_game = GameDescription::construct_game(game_description);
 
     let mut nn = NetworkType::new(sample_game.get_rows() * sample_game.get_columns(), layers.to_vec());
-    // nn.set_dropout(DropoutType::Weight(0.10));
-    nn.set_dropout(DropoutType::None);
-    nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f32)));
+    nn.set_dropout(DropoutType::Weight(0.10));
+    // nn.set_dropout(DropoutType::None);
+    // nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f32)));
 
     AgentType::new(game_description, nn, 0.2)
 }
@@ -152,10 +152,11 @@ fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<A
             num_neurons: 100_usize,
             function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
         },*/
+        /*
         LayerDescription {
             num_neurons: 160_usize,
             function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
-        },
+        }, */
         LayerDescription {
             num_neurons: 80_usize,
             function_descriptor: ActivationFunctionDescriptor::TwoPlayerScore
@@ -170,7 +171,7 @@ fn construct_agents(game_description: GameDescription) -> Vec<UnsafeCell<Mutex<A
         }
     ];
 
-    let num_agents = 4;
+    let num_agents = 3;
     let mut agents: Vec<UnsafeCell<Mutex<AgentType>>> = Vec::with_capacity(num_agents + 2);
 
     for i in 0..num_agents {
@@ -198,9 +199,9 @@ fn battle_agents(batches: usize, trainer: &KSuccessionTrainer, agents: &[UnsafeC
     let mut agent_errors = Matrix::new(agents.len(), 1, &|_,_| 0_f64);
 
     // TODO(knielsen): Figure out a way to save agent state
-    let rounds_per_batch = 5;
+    let rounds_per_batch = 10;
     let report_interval = 10;
-    let snapshot_interval = 5000;
+    let snapshot_interval = 500000;
     let mut prev_agent_stats = agent_stats.clone();
     for i in 0..batches {
         if i % report_interval == 0 {
