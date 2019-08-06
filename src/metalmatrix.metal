@@ -8,14 +8,20 @@ kernel void add_arrays(device const float* A,
     result[index] = A[index] + B[index];
 }
 
-kernel void multiply(device int A_rows, device int A_cols, device const float* A,
-                     device int B_rows, device int B_cols, device const float* B,
+struct MatrixDescriptor {
+    uint rows;
+    uint cols;
+    device float* data;
+};
+
+kernel void multiply(device const MatrixDescriptor& A [[buffer(0)]],
+                     device const MatrixDescriptor& B [[buffer(1)]],
                      device float* R,
                      uint2 index [[thread_position_in_grid]])
 {
     float scalar = 0;
-    for (int k = 0; k < A_cols; k++) {
-        scalar += A[index.y * A_cols + k] * B[k * B_cols + index.x];
+    for (uint k = 0; k < A.cols; k++) {
+        scalar += A.data[index.y * A.cols + k] * B.data[k * B.cols + index.x];
     }
-    R[index.y * B_cols + index.x] = scalar;
+    R[index.y * B.cols + index.x] = scalar;
 }
