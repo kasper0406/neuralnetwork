@@ -1,12 +1,12 @@
-use std::fmt;
-use std::ops::{Add, AddAssign, Sub, Mul, Index, IndexMut};
+use num::Zero;
 use rand::{thread_rng, Rng};
 use rand::distributions::Uniform;
-use num::Zero;
+use std::fmt;
+use std::ops::{Add, AddAssign, Sub, SubAssign, Mul, Index, IndexMut};
 use std::collections::HashSet;
 use std::cmp;
-
-use rayon::prelude::*;
+use rayon::prelude::ParallelSliceMut;
+use rayon::iter::{ ParallelIterator, IndexedParallelIterator };
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Matrix<T> {
@@ -15,8 +15,8 @@ pub struct Matrix<T> {
     values: Vec<T>
 }
 
-impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + Sync + AddAssign + Add<Output=T>> Matrix<T> {
-    pub fn new<F: Fn(usize, usize) -> T + Sync>(rows: usize, columns: usize, populator: &F) -> Matrix<T> {
+impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + AddAssign + Add<Output=T>> Matrix<T> {
+    pub fn new<F: Fn(usize, usize) -> T>(rows: usize, columns: usize, populator: &F) -> Matrix<T> {
         assert!(rows > 0, "A matrix must have >0 rows");
         assert!(columns > 0, "A matrix must have >0 columns");
 
@@ -28,6 +28,10 @@ impl<T: Copy + Mul<Output=T> + Zero + Send + Sync + Send + Sync + AddAssign + Ad
         }
 
         Matrix { rows: rows, columns: columns, values: values }
+    }
+
+    pub fn raw_values(&self) -> &Vec<T> {
+        return &self.values;
     }
 
     pub fn slow_mul(self, rhs: &Matrix<T>) -> Matrix<T> {
@@ -145,8 +149,8 @@ impl<'a, T: Add<Output=T> + Mul<Output=T> + AddAssign + Zero + Send + Sync + Cop
     }
 }
 
-impl<T: AddAssign + Copy> AddAssign for Matrix<T> {
-    fn add_assign(&mut self, other: Matrix<T>) {
+impl<'a, T: AddAssign + Copy> AddAssign<&'a Matrix<T>> for Matrix<T> {
+    fn add_assign(&mut self, other: &'a Matrix<T>) {
         assert!(self.rows == other.rows, "Row count must be the same!");
         assert!(self.columns == other.columns, "Column count must be the same!");
 
@@ -171,7 +175,20 @@ impl<'a, T: Sub<Output=T> + Mul<Output=T> + AddAssign + Zero + Send + Sync + Cop
     }
 }
 
-impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync> Mul for &'a Matrix<T> {
+impl<'a, T: SubAssign + Copy> SubAssign<&'a Matrix<T>> for Matrix<T> {
+    fn sub_assign(&mut self, other: &'a Matrix<T>) {
+        assert!(self.rows == other.rows, "Row count must be the same!");
+        assert!(self.columns == other.columns, "Column count must be the same!");
+
+        for row in 0..self.rows {
+            for column in 0..self.columns {
+                self[(row, column)] -= other[(row, column)];
+            }
+        }
+    }
+}
+
+impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync + num::Float + fmt::Display> Mul for &'a Matrix<T> {
     type Output = Matrix<T>;
 
     fn mul(self, rhs: &Matrix<T>) -> Matrix<T> {
@@ -195,11 +212,19 @@ impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Syn
                         let mut res: T = T::zero();
                         for k in 0..self.columns {
                             res += self[(row_num, k)] * rhs[(k, col_num)];
+                            
+                            if cfg!(debug_assertions) && res.is_nan() {
+                                let a = self[(row_num, k)];
+                                let b = rhs[(k, col_num)];
+
+                                panic!("Unexpected NaN multiplying: {} * {}", a, b);
+                            }
                         }
+
                         chunk[chunk_index] = res;
                     }
                 });
-        
+
         Matrix { rows: self.rows, columns: rhs.columns, values: values }
     }
 }
@@ -213,6 +238,15 @@ impl<'a> Mul<f64> for &'a Matrix<f64> {
         });
     }
 }
+impl<'a> Mul<f32> for &'a Matrix<f32> {
+    type Output = Matrix<f32>;
+
+    fn mul(self, rhs: f32) -> Matrix<f32> {
+        return Matrix::new(self.rows, self.columns, &|row, column| {
+            return rhs * self[(row, column)];
+        });
+    }
+}
 
 impl<'a> Mul<&'a Matrix<f64>> for f64 {
     type Output = Matrix<f64>;
@@ -221,8 +255,15 @@ impl<'a> Mul<&'a Matrix<f64>> for f64 {
         return rhs * self;
     }
 }
+impl<'a> Mul<&'a Matrix<f32>> for f32 {
+    type Output = Matrix<f32>;
 
-impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync> Mul for Matrix<T> {
+    fn mul(self, rhs: &Matrix<f32>) -> Matrix<f32> {
+        return rhs * self;
+    }
+}
+
+impl<'a, T: Mul<Output=T> + AddAssign + Add<Output=T> + Copy + Zero + Send + Sync + num::Float + fmt::Display> Mul for Matrix<T> {
     type Output = Matrix<T>;
 
     fn mul(self, rhs: Matrix<T>) -> Matrix<T> {
