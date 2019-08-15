@@ -2,3 +2,5 @@
 **/*.rs.bk
 .vscode
 agents/
+.DS_Store
+*.metallib
