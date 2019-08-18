@@ -1,8 +1,9 @@
 use metal::*;
 use objc_foundation::{INSString, INSArray};
 
+use matrixhandle::MatrixHandle;
 use matrix::Matrix;
-use std::ops::{Add, Mul};
+use std::ops::{Add, Sub, Mul};
 
 lazy_static! {
     static ref METAL_INSTANCE: MetalInstance = MetalInstance::new();
@@ -15,6 +16,35 @@ pub struct MetalMatrixHandle {
 }
 
 impl MetalMatrixHandle {
+    fn encode_to_metal_buffer<'a>(&self,
+                              command_encoder: &'a ComputeCommandEncoderRef,
+                              kernel: &Function,
+                              index: u64) -> Buffer {
+        let arg_encoder = kernel.new_argument_encoder(index);
+        let matrix_buffer = METAL_INSTANCE.device.new_buffer(
+            arg_encoder.encoded_length(),
+            MTLResourceOptions::empty()
+        );
+        arg_encoder.set_argument_buffer(&matrix_buffer, 0);
+
+        let data_ptr = arg_encoder.constant_data(0) as *mut u64;
+        unsafe { std::ptr::write(data_ptr, self.rows) };
+
+        let data_ptr = arg_encoder.constant_data(1) as *mut u64;
+        unsafe { std::ptr::write(data_ptr, self.columns) };
+
+        arg_encoder.set_buffer(&self.data, 0, 2);
+
+        // Signal to the command encoder that the matrix data will be used in the computation
+        command_encoder.use_resource(&self.data, MTLResourceUsage::Read);
+
+        return matrix_buffer;
+    }
+
+/*
+}
+impl MatrixHandle for MetalMatrixHandle { */
+
     fn from_matrix(matrix: &Matrix<f32>) -> MetalMatrixHandle {
         let mut buf = Vec::with_capacity(matrix.rows() * matrix.columns());
         for row in 0..matrix.rows() {
@@ -45,76 +75,62 @@ impl MetalMatrixHandle {
         return self.columns as usize;
     }
 
-    fn encode_to_metal_buffer(&self,
-                              command_encoder: &ComputeCommandEncoderRef,
-                              kernel: &Function, index: u64) -> Buffer {
-        let arg_encoder = kernel.new_argument_encoder(index);
-        let matrix_buffer = METAL_INSTANCE.device.new_buffer(
-            arg_encoder.encoded_length(),
-            MTLResourceOptions::empty()
+    fn entrywise_product(&self, rhs: &Self) -> Self {
+        return METAL_INSTANCE.execute_kernel_with_result_alloc(
+            &METAL_INSTANCE.entrywise_product_kernel,
+            &[BufferDescription::MetalBuffer(&self.data), BufferDescription::MetalBuffer(&rhs.data)],
+            (self.rows() * self.columns(), 1),
+            (self.rows(), self.columns())
         );
-        arg_encoder.set_argument_buffer(&matrix_buffer, 0);
+    }
 
-        let data_ptr = arg_encoder.constant_data(0) as *mut u64;
-        unsafe { std::ptr::write(data_ptr, self.rows) };
-
-        let data_ptr = arg_encoder.constant_data(1) as *mut u64;
-        unsafe { std::ptr::write(data_ptr, self.columns) };
-
-        arg_encoder.set_buffer(&self.data, 0, 2);
-
-        // Signal to the command encoder that the matrix data will be used in the computation
-        command_encoder.use_resource(&self.data, MTLResourceUsage::Read);
-
-        return matrix_buffer;
+    fn transpose(&self) -> Self {
+        return METAL_INSTANCE.execute_kernel_with_result_alloc(
+            &METAL_INSTANCE.transpose_kernel,
+            &[BufferDescription::Matrix(&self)],
+            (self.columns(), self.rows()),
+            (self.columns(), self.rows())
+        );
     }
 }
 
+impl Add<MetalMatrixHandle> for MetalMatrixHandle {
+    type Output = MetalMatrixHandle;
+
+    fn add(self, rhs: MetalMatrixHandle) -> MetalMatrixHandle {
+        return &self + &rhs;
+    }
+}
 impl<'a> Add<&'a MetalMatrixHandle> for &'a MetalMatrixHandle {
     type Output = MetalMatrixHandle;
 
     fn add(self, rhs: &'a MetalMatrixHandle) -> MetalMatrixHandle {
-        assert!(self.rows() == rhs.rows(), "Number of rows must match");
-        assert!(self.columns() == rhs.columns(), "Number of columns must match");
-
-        let count = self.rows() * self.columns();
-        let res_buffer = METAL_INSTANCE.device.new_buffer(
-            (count * std::mem::size_of::<f32>()) as u64,
-            MTLResourceOptions::StorageModePrivate
+        return METAL_INSTANCE.execute_kernel_with_result_alloc(
+            &METAL_INSTANCE.add_kernel,
+            &[BufferDescription::MetalBuffer(&self.data), BufferDescription::MetalBuffer(&rhs.data)],
+            (self.rows() * self.columns(), 1),
+            (self.rows(), self.columns())
         );
+    }
+}
 
-        let command_buffer = METAL_INSTANCE.command_queue.new_command_buffer();
-        let command_encoder = command_buffer.new_compute_command_encoder();
-        
-        command_encoder.set_compute_pipeline_state(&METAL_INSTANCE.sum_pipeline_state);
-        command_encoder.set_buffers(0, &[ Some(&self.data), Some(&rhs.data), Some(&res_buffer) ], &[ 0, 0, 0 ]);
+impl Sub<MetalMatrixHandle> for MetalMatrixHandle {
+    type Output = MetalMatrixHandle;
 
-        let threads_per_threadgroup = MTLSize {
-            width: METAL_INSTANCE.sum_pipeline_state.thread_execution_width(), // Consider if using maxTotalThreadsPerThreadgroup is better here
-            height: 1,
-            depth: 1
-        };
-        let threads_per_grid = MTLSize {
-            width: count as u64,
-            height: 1,
-            depth: 1
-        };
+    fn sub(self, rhs: MetalMatrixHandle) -> MetalMatrixHandle {
+        return &self - &rhs;
+    }
+}
+impl<'a> Sub<&'a MetalMatrixHandle> for &'a MetalMatrixHandle {
+    type Output = MetalMatrixHandle;
 
-        unsafe {
-            msg_send![command_encoder,
-                dispatchThreads: threads_per_grid
-                threadsPerThreadgroup: threads_per_threadgroup
-            ]
-        }
-
-        command_encoder.end_encoding();
-        command_buffer.commit();
-
-        return MetalMatrixHandle {
-            rows: self.rows,
-            columns: self.columns,
-            data: res_buffer
-        }
+    fn sub(self, rhs: &'a MetalMatrixHandle) -> MetalMatrixHandle {
+        return METAL_INSTANCE.execute_kernel_with_result_alloc(
+            &METAL_INSTANCE.sub_kernel,
+            &[BufferDescription::MetalBuffer(&self.data), BufferDescription::MetalBuffer(&rhs.data)],
+            (self.rows() * self.columns(), 1),
+            (self.rows(), self.columns())
+        );
     }
 }
 
@@ -134,17 +150,17 @@ impl<'a> Mul<&'a MetalMatrixHandle> for &'a MetalMatrixHandle {
         let command_buffer = METAL_INSTANCE.command_queue.new_command_buffer();
         let command_encoder = command_buffer.new_compute_command_encoder();
 
-        let self_buffer = self.encode_to_metal_buffer(command_encoder, &METAL_INSTANCE.mul_kernel, 0);
-        let rhs_buffer = rhs.encode_to_metal_buffer(command_encoder, &METAL_INSTANCE.mul_kernel, 0);
+        let self_buffer = self.encode_to_metal_buffer(command_encoder, &METAL_INSTANCE.mul_kernel.function, 0);
+        let rhs_buffer = rhs.encode_to_metal_buffer(command_encoder, &METAL_INSTANCE.mul_kernel.function, 1);
 
-        command_encoder.set_compute_pipeline_state(&METAL_INSTANCE.mul_pipeline_state);
+        command_encoder.set_compute_pipeline_state(&METAL_INSTANCE.mul_kernel.pipeline_state);
         command_encoder.set_buffer(0, Some(&self_buffer), 0);
         command_encoder.set_buffer(1, Some(&rhs_buffer), 0);
         command_encoder.set_buffer(2, Some(&res_buffer), 0);
 
         let threads_per_threadgroup = MTLSize {
-            width: METAL_INSTANCE.sum_pipeline_state.thread_execution_width(),
-            height: METAL_INSTANCE.sum_pipeline_state.max_total_threads_per_group() / METAL_INSTANCE.sum_pipeline_state.thread_execution_width(),
+            width: METAL_INSTANCE.mul_kernel.pipeline_state.thread_execution_width(),
+            height: METAL_INSTANCE.mul_kernel.pipeline_state.max_total_threads_per_group() / METAL_INSTANCE.mul_kernel.pipeline_state.thread_execution_width(),
             depth: 1
         };
         let threads_per_grid = MTLSize {
@@ -171,14 +187,31 @@ impl<'a> Mul<&'a MetalMatrixHandle> for &'a MetalMatrixHandle {
     }
 }
 
+impl Clone for MetalMatrixHandle {
+    fn clone(&self) -> MetalMatrixHandle {
+        panic!("To be implemented!");
+    }
+}
+
+enum BufferDescription<'a> {
+    MetalBuffer(&'a Buffer),
+    Matrix(&'a MetalMatrixHandle),
+}
+
+struct KernelDescriptor {
+    function: Function,
+    pipeline_state: ComputePipelineState,
+}
+
 struct MetalInstance {
     device: Device,
     command_queue: CommandQueue,
 
-    sum_pipeline_state: ComputePipelineState,
-
-    mul_kernel: Function,
-    mul_pipeline_state: ComputePipelineState
+    add_kernel: KernelDescriptor,
+    sub_kernel: KernelDescriptor,
+    entrywise_product_kernel: KernelDescriptor,
+    transpose_kernel: KernelDescriptor,
+    mul_kernel: KernelDescriptor,
 }
 
 unsafe impl Sync for MetalInstance { }
@@ -198,14 +231,20 @@ impl MetalInstance {
             println!("{}", name.as_str());
         }
 
-        let sum_kernel = metal_matrix_lib.get_function("add_arrays", None).unwrap();
-        let sum_pipeline_state = device.new_compute_pipeline_state_with_function(&sum_kernel).unwrap();
-
-        let mul_kernel = metal_matrix_lib.get_function("multiply", None).unwrap();
-        let mul_pipeline_state = device.new_compute_pipeline_state_with_function(&mul_kernel).unwrap();
+        let register_kernel = |name| {
+            let function = metal_matrix_lib.get_function(name, None).unwrap();
+            let pipeline_state = device.new_compute_pipeline_state_with_function(&function).unwrap();
+            return KernelDescriptor { function, pipeline_state };
+        };
 
         return MetalInstance {
-            device, command_queue, sum_pipeline_state, mul_kernel, mul_pipeline_state
+            command_queue,
+            add_kernel: register_kernel("add"),
+            sub_kernel: register_kernel("sub"),
+            entrywise_product_kernel: register_kernel("entrywise_product"),
+            transpose_kernel: register_kernel("transpose"),
+            mul_kernel: register_kernel("mul"),
+            device
         }
     }
 
@@ -256,23 +295,109 @@ impl MetalInstance {
         }
         return dst;
     }
+
+    fn execute_kernel(&self,
+                      kernel: &KernelDescriptor,
+                      buffers: &[BufferDescription],
+                      result_buffer: &Buffer,
+                      grid_size: (usize, usize)) {
+        let command_buffer = self.command_queue.new_command_buffer();
+        let command_encoder = command_buffer.new_compute_command_encoder();
+
+        let pipeline_state = &kernel.pipeline_state;
+        command_encoder.set_compute_pipeline_state(&pipeline_state);
+
+        let mut _lifetime_buffers = Vec::new();
+        for (i, buffer_description) in buffers.iter().enumerate() {
+            let buffer = match buffer_description {
+                BufferDescription::MetalBuffer(buffer) => buffer,
+                BufferDescription::Matrix(handle) => {
+                    let buffer = handle.encode_to_metal_buffer(command_encoder, &kernel.function, i as u64);
+
+                    // Make lifetime checker happy
+                    _lifetime_buffers.push(buffer);
+                    _lifetime_buffers.last().unwrap()
+                }
+            };
+
+            command_encoder.set_buffer(i as u64, Some(buffer), 0);
+        }
+        command_encoder.set_buffer(buffers.len() as u64, Some(result_buffer), 0);
+
+        let metal_grid_size = MTLSize {
+            width: grid_size.0 as u64,
+            height: grid_size.1 as u64,
+            depth: 1
+        };
+
+        let threads_per_threadgroup = MTLSize {
+            width: pipeline_state.thread_execution_width(),
+            height: pipeline_state.max_total_threads_per_group() / pipeline_state.thread_execution_width(),
+            depth: 1
+        };
+
+        unsafe {
+            msg_send![command_encoder,
+                dispatchThreads: metal_grid_size
+                threadsPerThreadgroup: threads_per_threadgroup
+            ]
+        }
+
+        command_encoder.end_encoding();
+        command_buffer.commit();
+    }
+
+    fn execute_kernel_with_result_alloc(&self,
+                                        pipeline_state: &KernelDescriptor,
+                                        buffers: &[BufferDescription],
+                                        grid_size: (usize, usize),
+                                        result_size: (usize, usize)) -> MetalMatrixHandle
+    {
+        let count = result_size.0 * result_size.1;
+        let res_buffer = self.device.new_buffer(
+            (count * std::mem::size_of::<f32>()) as u64,
+            MTLResourceOptions::StorageModePrivate
+        );
+
+        self.execute_kernel(pipeline_state, &buffers, &res_buffer, grid_size);
+
+        return MetalMatrixHandle {
+            rows: result_size.0 as u64,
+            columns: result_size.1 as u64,
+            data: res_buffer
+        }
+    }
 }
 
 pub fn test() {
+    /*
+    let A = Matrix::new(10, 3, &|row, col| (row * 3 + col) as f32);
+    println!("{}", A);
+    println!("");
+
+    let handleA = MetalMatrixHandle::from_matrix(&A);
+    let handleB = handleA.transpose();
+    let R = MetalMatrixHandle::to_matrix(&handleB); */
+
     let A = Matrix::new(50, 50, &|row, col| if row == col { 1 } else { 0 } as f32);
     let B = Matrix::new(50, 50, &|row, col| if row == col { 1 } else { 0 } as f32);
 
     let handleA = MetalMatrixHandle::from_matrix(&A);
     let handleB = MetalMatrixHandle::from_matrix(&B);
 
-    let handleC = &handleA * &handleB;
+    let handleC = &handleA + &handleB;
+    let handleD = &handleC * &handleC;
+    let handleE = &handleD - &handleA;
 
-    let C = MetalMatrixHandle::to_matrix(&(&(&handleC + &handleC) * &(&handleA + &handleB)));
+    let handleF = handleD.entrywise_product(&handleE);
+    let handleG = handleF.transpose();
+
+    let R = MetalMatrixHandle::to_matrix(&handleG);
 
     // let C = &A * &B;
 
     println!("Result of multiplication:");
-    println!("{}", C);
+    println!("{}", R);
 
     /*
     let handleC = &handleA + &handleB;
