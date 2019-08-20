@@ -4,6 +4,7 @@ use neuralnetwork::{ ActivationFunctionDescriptor, NeuralNetwork, LayerDescripti
 use neuralnetwork::simple::SimpleNeuralNetwork;
 use neuralnetwork::{ DropoutType, Regulizer };
 use simplematrixhandle::SimpleMatrixHandle;
+use metalmatrixhandle::MetalMatrixHandle;
 use matrixhandle::MatrixHandle;
 use matrix::Matrix;
 use std::fs::File;
@@ -12,7 +13,8 @@ use std::iter::FromIterator;
 
 const image_size: usize = 16 * 16;
 
-type MatrixHandleType = SimpleMatrixHandle;
+// type MatrixHandleType = SimpleMatrixHandle;
+type MatrixHandleType = MetalMatrixHandle;
 type Network = SimpleNeuralNetwork<MatrixHandleType>;
 
 #[derive(Clone)]

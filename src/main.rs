@@ -39,9 +39,9 @@ fn main() {
 
 
     // battler::start_battles(10000);
-    // digitclassifier::test_digit_classification();
+    digitclassifier::test_digit_classification();
 
-    metalmatrixhandle::test();
+    // metalmatrixhandle::test();
 
     // TODO(knielsen): Condition this on Metal feature flag
     unsafe {
