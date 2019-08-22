@@ -10,11 +10,11 @@ pub struct SimpleMatrixHandle {
 impl MatrixHandle for SimpleMatrixHandle {
     fn of_size(rows: usize, columns: usize) -> SimpleMatrixHandle {
         // Just some arbitrary matrix, as we will allocate an entire matrix anyways
-        return Self::from_matrix(Matrix::new(1, 1, &|row, col| 0_f32));
+        return Self::from_matrix(&Matrix::new(1, 1, &|row, col| 0_f32));
     }
 
-    fn from_matrix(matrix: Matrix<f32>) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle { matrix: matrix }
+    fn from_matrix(matrix: &Matrix<f32>) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle { matrix: matrix.clone() }
     }
 
     fn copy_from_matrix(dst: &mut Self, matrix: Matrix<f32>) {
@@ -30,27 +30,27 @@ impl MatrixHandle for SimpleMatrixHandle {
     }
 
     fn dropout_elements(&self, rate: f32) -> Self {
-        return Self::from_matrix(self.matrix.dropout_elements(rate as f64));
+        return Self::from_matrix(&self.matrix.dropout_elements(rate as f64));
     }
 
     fn dropout_rows(&self, rate: f32) -> Self {
-        return Self::from_matrix(self.matrix.dropout_rows(rate as f64));
+        return Self::from_matrix(&self.matrix.dropout_rows(rate as f64));
     }
 
     fn add_constant_row(&self, value: f32) -> Self {
-        return Self::from_matrix(self.matrix.add_constant_row(value));
+        return Self::from_matrix(&self.matrix.add_constant_row(value));
     }
 
     fn remove_first_row(&self) -> Self {
-        return Self::from_matrix(self.matrix.remove_first_row());
+        return Self::from_matrix(&self.matrix.remove_first_row());
     }
 
     fn transpose(&self) -> Self {
-        return Self::from_matrix(self.matrix.transpose());
+        return Self::from_matrix(&self.matrix.transpose());
     }
 
     fn entrywise_product(&self, rhs: &SimpleMatrixHandle) -> Self {
-        return Self::from_matrix(self.matrix.entrywise_product(&rhs.matrix));
+        return Self::from_matrix(&self.matrix.entrywise_product(&rhs.matrix));
     }
 
     fn inplace_entrywise_product(&mut self, rhs: &Self) {
@@ -88,7 +88,7 @@ impl MatrixHandle for SimpleMatrixHandle {
 
 impl Clone for SimpleMatrixHandle {
     fn clone(&self) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(self.matrix.clone());
+        return SimpleMatrixHandle::from_matrix(&self.matrix.clone());
     }
 }
 
@@ -102,7 +102,7 @@ impl<'a> Add<&'a SimpleMatrixHandle> for &'a SimpleMatrixHandle {
     type Output = SimpleMatrixHandle;
 
     fn add(self, rhs: &'a SimpleMatrixHandle) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(&self.matrix + &rhs.matrix);
+        return SimpleMatrixHandle::from_matrix(&(&self.matrix + &rhs.matrix));
     }
 }
 
@@ -128,7 +128,7 @@ impl<'a> Sub<&'a SimpleMatrixHandle> for &'a SimpleMatrixHandle {
     type Output = SimpleMatrixHandle;
 
     fn sub(self, rhs: &'a SimpleMatrixHandle) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(&self.matrix - &rhs.matrix);
+        return SimpleMatrixHandle::from_matrix(&(&self.matrix - &rhs.matrix));
     }
 }
 
@@ -152,14 +152,14 @@ impl Mul for SimpleMatrixHandle {
 impl<'a> Mul for &'a SimpleMatrixHandle {
     type Output = SimpleMatrixHandle;
     fn mul(self, rhs: &SimpleMatrixHandle) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(&self.matrix * &rhs.matrix);
+        return SimpleMatrixHandle::from_matrix(&(&self.matrix * &rhs.matrix));
     }
 }
 
 impl<'a> Mul<f32> for &'a SimpleMatrixHandle {
     type Output = SimpleMatrixHandle;
     fn mul(self, scalar: f32) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(scalar * &self.matrix);
+        return SimpleMatrixHandle::from_matrix(&(scalar * &self.matrix));
     }
 }
 impl Mul<f32> for SimpleMatrixHandle {
@@ -195,6 +195,6 @@ impl<'de> Deserialize<'de> for SimpleMatrixHandle {
         where D: Deserializer<'de>
     {
         let deserialize_result = Matrix::deserialize(deserializer);
-        deserialize_result.map(|matrix| SimpleMatrixHandle::from_matrix(matrix))
+        deserialize_result.map(|matrix| SimpleMatrixHandle::from_matrix(&matrix))
     }
 }

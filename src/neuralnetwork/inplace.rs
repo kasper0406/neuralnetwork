@@ -173,7 +173,7 @@ where
             let network_layer = Layer {
                 function_descriptor: layer.function_descriptor,
                 weights: MH::from_matrix(
-                    Matrix::new(layer.num_neurons, prev_layer_neurons + 1, &|row, col| {
+                    &Matrix::new(layer.num_neurons, prev_layer_neurons + 1, &|row, col| {
                         weight_distribution.sample(&mut rand::thread_rng()) as f32
                     })
                 )
@@ -201,7 +201,7 @@ where
             _weights.push(MH::of_size(layers[i].weights.rows(),
                                                 layers[i].weights.columns()));
             _momentums.push(MH::from_matrix(
-                Matrix::new(layers[i].weights.rows(), layers[i].weights.columns(), &|_, _| 0_f32)
+                &Matrix::new(layers[i].weights.rows(), layers[i].weights.columns(), &|_, _| 0_f32)
             ));
             _chain.push(MH::of_size(layers[layers.len() - i - 1].weights.rows(), MAX_INPUT_COLUMNS));
         }

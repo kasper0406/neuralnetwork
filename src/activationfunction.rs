@@ -1,6 +1,9 @@
 use simplematrixhandle::SimpleMatrixHandle;
 use matrix::Matrix;
 use matrixhandle::MatrixHandle;
+use metalmatrixhandle::MetalMatrixHandle;
+use metalmatrixhandle::ElementFunction;
+use verifyingmatrixhandle::VerifyingMatrixHandle;
 
 #[cfg(matrixlib)]
 #[link(name = "matrix", kind = "static")]
@@ -97,11 +100,11 @@ impl ActivationFunction<Matrix<f32>> for Sigmoid {
 
 impl ActivationFunction<SimpleMatrixHandle> for Sigmoid {
     fn evaluate(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
+        return SimpleMatrixHandle::from_matrix(&self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
     }
 
     fn derivative(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(self.derivative(&SimpleMatrixHandle::to_matrix(input)));
+        return SimpleMatrixHandle::from_matrix(&self.derivative(&SimpleMatrixHandle::to_matrix(input)));
     }
 
     fn inline_evaluate(&self, input: &mut SimpleMatrixHandle) {
@@ -161,6 +164,53 @@ impl ActivationFunction<MatrixHandle> for Sigmoid {
     }
 }
 
+impl ActivationFunction<MetalMatrixHandle> for Sigmoid {
+    fn evaluate(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        return input.apply_function(ElementFunction::Sigmoid);
+    }
+
+    fn derivative(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        return input.apply_function(ElementFunction::SigmoidDerivative);
+    }
+
+    fn inline_evaluate(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+impl ActivationFunction<VerifyingMatrixHandle> for Sigmoid {
+    fn evaluate(&self, input: &VerifyingMatrixHandle) -> VerifyingMatrixHandle {
+        let res = VerifyingMatrixHandle {
+            simple: self.evaluate(&input.simple),
+            metal: self.evaluate(&input.metal)
+        };
+        res.verify();
+        return res;
+    }
+
+    fn derivative(&self, input: &VerifyingMatrixHandle) -> VerifyingMatrixHandle {
+        input.verify();
+        let res = VerifyingMatrixHandle {
+            simple: self.derivative(&input.simple),
+            metal: self.derivative(&input.metal)
+        };
+        res.verify();
+        return res;
+    }
+
+    fn inline_evaluate(&self, input: &mut VerifyingMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut VerifyingMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
 pub struct Relu;
 impl ActivationFunction<f32> for Relu {
     fn evaluate(&self, x: &f32) -> f32 {
@@ -212,11 +262,11 @@ impl ActivationFunction<Matrix<f32>> for Relu {
 
 impl ActivationFunction<SimpleMatrixHandle> for Relu {
     fn evaluate(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
+        return SimpleMatrixHandle::from_matrix(&self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
     }
 
     fn derivative(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(self.derivative(&SimpleMatrixHandle::to_matrix(input)));
+        return SimpleMatrixHandle::from_matrix(&self.derivative(&SimpleMatrixHandle::to_matrix(input)));
     }
 
     fn inline_evaluate(&self, input: &mut SimpleMatrixHandle) {
@@ -224,6 +274,42 @@ impl ActivationFunction<SimpleMatrixHandle> for Relu {
     }
 
     fn inline_derivative(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+impl ActivationFunction<MetalMatrixHandle> for Relu {
+    fn evaluate(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn derivative(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn inline_evaluate(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+impl ActivationFunction<VerifyingMatrixHandle> for Relu {
+    fn evaluate(&self, input: &VerifyingMatrixHandle) -> VerifyingMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn derivative(&self, input: &VerifyingMatrixHandle) -> VerifyingMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn inline_evaluate(&self, input: &mut VerifyingMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut VerifyingMatrixHandle) {
         panic!("Not implemented!");
     }
 }
@@ -345,11 +431,11 @@ impl ActivationFunction<Matrix<f32>> for TwoPlayerScore {
 
 impl ActivationFunction<SimpleMatrixHandle> for TwoPlayerScore {
     fn evaluate(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
+        return SimpleMatrixHandle::from_matrix(&self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
     }
 
     fn derivative(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
-        return SimpleMatrixHandle::from_matrix(self.derivative(&SimpleMatrixHandle::to_matrix(input)));
+        return SimpleMatrixHandle::from_matrix(&self.derivative(&SimpleMatrixHandle::to_matrix(input)));
     }
 
     fn inline_evaluate(&self, input: &mut SimpleMatrixHandle) {
@@ -357,6 +443,42 @@ impl ActivationFunction<SimpleMatrixHandle> for TwoPlayerScore {
     }
 
     fn inline_derivative(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+impl ActivationFunction<MetalMatrixHandle> for TwoPlayerScore {
+    fn evaluate(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn derivative(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn inline_evaluate(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+impl ActivationFunction<VerifyingMatrixHandle> for TwoPlayerScore {
+    fn evaluate(&self, input: &VerifyingMatrixHandle) -> VerifyingMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn derivative(&self, input: &VerifyingMatrixHandle) -> VerifyingMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn inline_evaluate(&self, input: &mut VerifyingMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut VerifyingMatrixHandle) {
         panic!("Not implemented!");
     }
 }

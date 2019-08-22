@@ -4,9 +4,16 @@ use objc_foundation::{INSString, INSArray};
 use matrixhandle::MatrixHandle;
 use matrix::Matrix;
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul};
+use serde::{ Deserializer, Deserialize, Serializer, Serialize };
+
+use cocoa::foundation::NSAutoreleasePool;
 
 lazy_static! {
     static ref METAL_INSTANCE: MetalInstance = MetalInstance::new();
+}
+
+pub enum ElementFunction {
+    Sigmoid, SigmoidDerivative
 }
 
 pub struct MetalMatrixHandle {
@@ -17,9 +24,9 @@ pub struct MetalMatrixHandle {
 
 impl MetalMatrixHandle {
     fn encode_to_metal_buffer<'a>(&self,
-                              command_encoder: &'a ComputeCommandEncoderRef,
-                              kernel: &Function,
-                              index: u64) -> Buffer {
+                                  command_encoder: &'a ComputeCommandEncoderRef,
+                                  kernel: &Function,
+                                  index: u64) -> Buffer {
         let arg_encoder = kernel.new_argument_encoder(index);
         let matrix_buffer = METAL_INSTANCE.device.new_buffer(
             arg_encoder.encoded_length(),
@@ -39,6 +46,20 @@ impl MetalMatrixHandle {
         command_encoder.use_resource(&self.data, MTLResourceUsage::Read);
 
         return matrix_buffer;
+    }
+
+    pub fn apply_function(&self, function: ElementFunction) -> MetalMatrixHandle {
+        let kernel = match function {
+            ElementFunction::Sigmoid => &METAL_INSTANCE.sigmoid_kernel,
+            ElementFunction::SigmoidDerivative => &METAL_INSTANCE.sigmoid_derivative_kernel,
+        };
+
+        return METAL_INSTANCE.execute_kernel_with_result_alloc(
+            kernel,
+            &[BufferDescription::MetalBuffer(&self.data)],
+            (1, self.rows() * self.columns()),
+            (self.rows(), self.columns())
+        );
     }
 }
 
@@ -76,7 +97,7 @@ impl MatrixHandle for MetalMatrixHandle {
         panic!("Method 'multiply' not yet implemented!");
     }
 
-    fn from_matrix(matrix: Matrix<f32>) -> MetalMatrixHandle {
+    fn from_matrix(matrix: &Matrix<f32>) -> MetalMatrixHandle {
         let mut buf = Vec::with_capacity(matrix.rows() * matrix.columns());
         for row in 0..matrix.rows() {
             for col in 0..matrix.columns() {
@@ -110,7 +131,7 @@ impl MatrixHandle for MetalMatrixHandle {
         return METAL_INSTANCE.execute_kernel_with_result_alloc(
             &METAL_INSTANCE.entrywise_product_kernel,
             &[BufferDescription::MetalBuffer(&self.data), BufferDescription::MetalBuffer(&rhs.data)],
-            (self.rows() * self.columns(), 1),
+            (1, self.rows() * self.columns()),
             (self.rows(), self.columns())
         );
     }
@@ -119,13 +140,14 @@ impl MatrixHandle for MetalMatrixHandle {
         return METAL_INSTANCE.execute_kernel_with_result_alloc(
             &METAL_INSTANCE.transpose_kernel,
             &[BufferDescription::Matrix(&self)],
-            (self.columns(), self.rows()),
+            (self.rows(), self.columns()),
             (self.columns(), self.rows())
         );
     }
 
     fn add_constant_row(&self, value: f32) -> Self {
         let new_count = (self.rows() + 1) * self.columns();
+        let old_size = (self.rows() * self.columns() * std::mem::size_of::<f32>()) as u64;
         let new_size = (new_count * std::mem::size_of::<f32>()) as u64;
 
         let command_buffer = METAL_INSTANCE.command_queue.new_command_buffer();
@@ -145,7 +167,7 @@ impl MatrixHandle for MetalMatrixHandle {
             MTLResourceOptions::CPUCacheModeDefaultCache
         );
         blit_encoder.copy_from_buffer(&buffer_with_first_row_values, 0, &mut buffer, 0, bytes_per_row);
-        blit_encoder.copy_from_buffer(&self.data, 0, &mut buffer, bytes_per_row, new_size);
+        blit_encoder.copy_from_buffer(&self.data, 0, &mut buffer, bytes_per_row, old_size);
         blit_encoder.end_encoding();
 
         command_buffer.commit();
@@ -206,7 +228,7 @@ impl<'a> Add<&'a MetalMatrixHandle> for &'a MetalMatrixHandle {
         return METAL_INSTANCE.execute_kernel_with_result_alloc(
             &METAL_INSTANCE.add_kernel,
             &[BufferDescription::MetalBuffer(&self.data), BufferDescription::MetalBuffer(&rhs.data)],
-            (self.rows() * self.columns(), 1),
+            (1, self.rows() * self.columns()),
             (self.rows(), self.columns())
         );
     }
@@ -218,7 +240,7 @@ impl<'a> AddAssign for MetalMatrixHandle {
             &METAL_INSTANCE.add_kernel,
             &[BufferDescription::MetalBuffer(&self.data), BufferDescription::MetalBuffer(&rhs.data)],
             &self.data,
-            (self.rows() * self.columns(), 1)
+            (1, self.rows() * self.columns())
         );
     }
 }
@@ -237,7 +259,7 @@ impl<'a> Sub<&'a MetalMatrixHandle> for &'a MetalMatrixHandle {
         return METAL_INSTANCE.execute_kernel_with_result_alloc(
             &METAL_INSTANCE.sub_kernel,
             &[BufferDescription::MetalBuffer(&self.data), BufferDescription::MetalBuffer(&rhs.data)],
-            (self.rows() * self.columns(), 1),
+            (1, self.rows() * self.columns()),
             (self.rows(), self.columns())
         );
     }
@@ -249,7 +271,7 @@ impl<'a> SubAssign for MetalMatrixHandle {
             &METAL_INSTANCE.sub_kernel,
             &[BufferDescription::MetalBuffer(&self.data), BufferDescription::MetalBuffer(&rhs.data)],
             &self.data,
-            (self.rows() * self.columns(), 1)
+            (1, self.rows() * self.columns())
         );
     }
 }
@@ -278,6 +300,12 @@ impl<'a> Mul<&'a MetalMatrixHandle> for &'a MetalMatrixHandle {
 
 impl Mul<f32> for MetalMatrixHandle {
     type Output = MetalMatrixHandle;
+    fn mul(self, scalar: f32) -> MetalMatrixHandle {
+        return &self * scalar;
+    }
+}
+impl<'a> Mul<f32> for &'a MetalMatrixHandle {
+    type Output = MetalMatrixHandle;
 
     fn mul(self, scalar: f32) -> MetalMatrixHandle {
         let data = [scalar; 1];
@@ -290,9 +318,15 @@ impl Mul<f32> for MetalMatrixHandle {
         return METAL_INSTANCE.execute_kernel_with_result_alloc(
             &METAL_INSTANCE.scalar_multiply_kernel,
             &[BufferDescription::MetalBuffer(&scalar_buffer), BufferDescription::MetalBuffer(&self.data)],
-            (self.rows() * self.columns(), 1),
+            (1, self.rows() * self.columns()),
             (self.rows(), self.columns())
         );
+    }
+}
+impl Mul<&MetalMatrixHandle> for f32 {
+    type Output = MetalMatrixHandle;
+    fn mul(self, matrix: &MetalMatrixHandle) -> MetalMatrixHandle {
+        return matrix * self;
     }
 }
 
@@ -307,6 +341,7 @@ impl Clone for MetalMatrixHandle {
             size,
             MTLResourceOptions::StorageModePrivate
         );
+        unsafe { msg_send![buffer, retain] };
 
         let blit_encoder = command_buffer.new_blit_command_encoder();
         blit_encoder.copy_from_buffer(&self.data, 0, &mut buffer, 0, size);
@@ -342,6 +377,9 @@ struct MetalInstance {
     transpose_kernel: KernelDescriptor,
     mul_kernel: KernelDescriptor,
     scalar_multiply_kernel: KernelDescriptor,
+
+    sigmoid_kernel: KernelDescriptor,
+    sigmoid_derivative_kernel: KernelDescriptor,
 }
 
 unsafe impl Sync for MetalInstance { }
@@ -375,6 +413,10 @@ impl MetalInstance {
             transpose_kernel: register_kernel("transpose"),
             mul_kernel: register_kernel("mul"),
             scalar_multiply_kernel: register_kernel("scalar_multiply"),
+
+            sigmoid_kernel: register_kernel("sigmoid"),
+            sigmoid_derivative_kernel: register_kernel("sigmoid_derivative"),
+
             device
         }
     }
@@ -387,6 +429,7 @@ impl MetalInstance {
             size,
             MTLResourceOptions::StorageModePrivate
         );
+        // unsafe { msg_send![buffer, retain] };
 
         let tmp = self.device.new_buffer_with_data(
             unsafe { std::mem::transmute(data.as_ptr()) },
@@ -456,14 +499,14 @@ impl MetalInstance {
         command_encoder.set_buffer(buffers.len() as u64, Some(result_buffer), 0);
 
         let metal_grid_size = MTLSize {
-            width: grid_size.0 as u64,
-            height: grid_size.1 as u64,
+            width: grid_size.1 as u64,
+            height: grid_size.0 as u64,
             depth: 1
         };
 
         let threads_per_threadgroup = MTLSize {
-            width: pipeline_state.thread_execution_width(),
-            height: pipeline_state.max_total_threads_per_group() / pipeline_state.thread_execution_width(),
+            width: u64::min(metal_grid_size.width, pipeline_state.thread_execution_width()),
+            height: u64::min(metal_grid_size.height, pipeline_state.max_total_threads_per_group() / pipeline_state.thread_execution_width()),
             depth: 1
         };
 
@@ -500,7 +543,38 @@ impl MetalInstance {
     }
 }
 
+unsafe impl Send for MetalMatrixHandle { }
+
+impl Drop for MetalMatrixHandle {
+    fn drop(&mut self) {
+        // println!("Dropping {}x{} matrix", self.rows(), self.columns());
+        unsafe {
+            // msg_send![ self.data, release ];
+        }
+        // println!("Finished dropping");
+    }
+}
+
+impl Serialize for MetalMatrixHandle {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        panic!("Serialize not implemented!");
+    }
+}
+
+impl<'de> Deserialize<'de> for MetalMatrixHandle {
+    fn deserialize<D>(deserializer: D) -> Result<MetalMatrixHandle, D::Error>
+        where D: Deserializer<'de>
+    {
+        panic!("Deserialize not implemented!");
+    }
+}
+
 pub fn test() {
+
+    // let pool = unsafe { NSAutoreleasePool::new(cocoa::base::nil) };
+
     /*
     let A = Matrix::new(10, 3, &|row, col| (row * 3 + col) as f32);
     println!("{}", A);
@@ -510,35 +584,51 @@ pub fn test() {
     let handleB = handleA.transpose();
     let R = MetalMatrixHandle::to_matrix(&handleB); */
 
-    let A = Matrix::new(50, 50, &|row, col| if row == col { 1 } else { 0 } as f32);
-    let B = Matrix::new(50, 50, &|row, col| if row == col { 1 } else { 0 } as f32);
+    let A = Matrix::new(100, 100, &|row, col| if row == col { 1 } else { 0 } as f32);
+    // let B = Matrix::new(50, 50, &|row, col| if row == col { 1 } else { 0 } as f32);
 
-    let handleA = MetalMatrixHandle::from_matrix(A);
-    let handleB = MetalMatrixHandle::from_matrix(B);
+    println!("Creating handles");
 
+    let mut handleA = MetalMatrixHandle::from_matrix(&A);
+    for _ in 0..10000 {
+        handleA = MetalMatrixHandle::from_matrix(&A);
+    }
+    // let handleB = MetalMatrixHandle::from_matrix(&B);
+
+    /*
+    println!("Doing operations");
     let handleC = &handleA + &handleB;
     let handleD = &handleC * &handleC;
     let handleE = &handleD - &handleA;
 
+    println!("Entrywise product and transpose");
     let handleF = handleD.entrywise_product(&handleE);
     let handleG = handleF.transpose();
 
+    println!("Add and remove rows");
     let handleH = handleG.remove_first_row();
     let handleI = handleH.add_constant_row(1.0);
 
+    println!("Create another matrix");
     let J = Matrix::new(50, 50, &|row, col| 1_f32);
-    let mut handleJ = MetalMatrixHandle::from_matrix(J);
+    let mut handleJ = MetalMatrixHandle::from_matrix(&J);
 
+    println!("Inplace operations");
     handleJ += handleI;
     handleJ -= handleA;
+    */
 
+    /*
+    println!("Clone");
     let handleK = handleJ.clone();
-    let handleL = handleK * 10.0f32;
+    let handleL = handleK * 0.1f32;
 
-    let R = MetalMatrixHandle::to_matrix(&handleL);
+    let handleM = handleL.apply_function(ElementFunction::Sigmoid);
 
     // let C = &A * &B;
+    */
 
+    let R = MetalMatrixHandle::to_matrix(&handleA);
     println!("Result of multiplication:");
     println!("{}", R);
 
@@ -550,4 +640,7 @@ pub fn test() {
     println!("{}", C); */
 
     // let B = Matrix::new(5, 5, &|row, col| row as f32 / col as f32);
+
+    // unsafe { pool.autorelease() };
+
 }

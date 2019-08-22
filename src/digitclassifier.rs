@@ -5,6 +5,7 @@ use neuralnetwork::simple::SimpleNeuralNetwork;
 use neuralnetwork::{ DropoutType, Regulizer };
 use simplematrixhandle::SimpleMatrixHandle;
 use metalmatrixhandle::MetalMatrixHandle;
+use verifyingmatrixhandle::VerifyingMatrixHandle;
 use matrixhandle::MatrixHandle;
 use matrix::Matrix;
 use std::fs::File;
@@ -15,6 +16,7 @@ const image_size: usize = 16 * 16;
 
 // type MatrixHandleType = SimpleMatrixHandle;
 type MatrixHandleType = MetalMatrixHandle;
+// type MatrixHandleType = VerifyingMatrixHandle;
 type Network = SimpleNeuralNetwork<MatrixHandleType>;
 
 #[derive(Clone)]
@@ -85,18 +87,16 @@ fn print_sample(sample: Matrix<f32>) {
 
 fn construct_network() -> Network {
     let layers = vec![
-        /*
         LayerDescription {
             num_neurons: 80_usize,
-            function: relu
-        }, */
-        /*
+            function_descriptor: ActivationFunctionDescriptor::Sigmoid
+        },
         LayerDescription {
             num_neurons: 50_usize,
             function_descriptor: ActivationFunctionDescriptor::Sigmoid
-        },*/
+        },
         LayerDescription {
-            num_neurons: 25_usize,
+            num_neurons: 20_usize,
             function_descriptor: ActivationFunctionDescriptor::Sigmoid
         },
         LayerDescription {
@@ -106,7 +106,7 @@ fn construct_network() -> Network {
     ];
 
     let mut nn = Network::new(image_size, layers.clone());
-    nn.set_dropout(DropoutType::Weight(0.10));
+    // nn.set_dropout(DropoutType::Weight(0.10));
     // nn.set_dropout(DropoutType::Neuron(0.05));
     nn.set_regulizer(Some(Regulizer::WeightPeanalizer(0.00003_f32)));
 
@@ -114,10 +114,10 @@ fn construct_network() -> Network {
 }
 
 fn samples_to_handle(samples: &[&ImageSample]) -> (MatrixHandleType, MatrixHandleType) {
-    let values = MatrixHandleType::from_matrix(Matrix::new(image_size, samples.len(),
+    let values = MatrixHandleType::from_matrix(&Matrix::new(image_size, samples.len(),
         &|row, col| samples[col].values[(0, row)]));
 
-    let labels = MatrixHandleType::from_matrix(Matrix::new(10, samples.len(),
+    let labels = MatrixHandleType::from_matrix(&Matrix::new(10, samples.len(),
         &|row, col| samples[col].label[(0, row)]));
 
     return (values, labels);
@@ -146,14 +146,14 @@ pub fn test_digit_classification() {
     let beta = 0.95_f32;
     const samples_per_batch: usize = 200;
 
-    for round in 0..1000 {
+    for round in 0..50 {
         let in_sample_error = compute_avg_error(&mut network, training_samples);
         println!("Avg error after {} rounds: {} in-sample, {} out-of-sample",
             round, in_sample_error, compute_avg_error(&mut network, test_samples));
 
         let mut momentums = None;
         for _ in 0..50 {
-            // Train 100 samples at the same time
+            // Train multiple samples at the same time
             let mut selected_samples = Vec::with_capacity(samples_per_batch);
             training_samples.choose_multiple(&mut rng, samples_per_batch).for_each(|sample| selected_samples.push(sample));
             let (values, labels) = samples_to_handle(selected_samples.as_slice());
@@ -173,7 +173,7 @@ pub fn test_digit_classification() {
 
     // TODO:This can be combined into one prediction instead
     for sample in test_samples {
-        let prediction_vector = MatrixHandleType::to_matrix(&network.predict(&MatrixHandleType::from_matrix(sample.values.clone())));
+        let prediction_vector = MatrixHandleType::to_matrix(&network.predict(&MatrixHandleType::from_matrix(&sample.values.clone())));
 
         let mut prediction = 0;
         let mut actual = 0;

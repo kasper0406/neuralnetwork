@@ -59,9 +59,9 @@ kernel void mul(device const MatrixDescriptor& A [[buffer(0)]],
 
 // Activation function computation
 
-kernel void apply_sigmoid(device const float* A,
-                          device float* R,
-                          uint index [[thread_position_in_grid]])
+kernel void sigmoid(device const float* A,
+                    device float* R,
+                    uint index [[thread_position_in_grid]])
 {
     float exponential = metal::exp(A[index]);
     R[index] = metal::isinf(exponential)
@@ -69,12 +69,12 @@ kernel void apply_sigmoid(device const float* A,
         : (exponential / (exponential + 1));
 }
 
-kernel void apply_sigmoid_derivative(device const float* A,
-                                     device float* R,
-                                     uint index [[thread_position_in_grid]])
+kernel void sigmoid_derivative(device const float* A,
+                               device float* R,
+                               uint index [[thread_position_in_grid]])
 {
     float exponential = metal::exp(A[index]);
     R[index] = metal::isinf(exponential)
         ? 0
-        : (exponential / (1 + exponential * (exponential + 2)));
+        : (exponential / (exponential * exponential + 1 + 2 * exponential));
 }

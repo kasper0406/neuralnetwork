@@ -5,7 +5,7 @@ use std::ops::{Add, AddAssign, Sub, SubAssign, Mul};
 pub trait MatrixHandle: Add + AddAssign + Sub + SubAssign + Mul + Mul<f32> + Clone
 {
     fn of_size(rows: usize, columns: usize) -> Self;
-    fn from_matrix(matrix: Matrix<f32>) -> Self;
+    fn from_matrix(matrix: &Matrix<f32>) -> Self;
     fn to_matrix(&self) -> Matrix<f32>;
     fn copy_from_matrix(dst: &mut Self, matrix: Matrix<f32>);
 

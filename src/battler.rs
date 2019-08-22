@@ -12,6 +12,8 @@ use neuralnetwork::inplace::InplaceNeuralNetwork;
 use neuralnetwork::simple::SimpleNeuralNetwork;
 
 use simplematrixhandle::SimpleMatrixHandle;
+use metalmatrixhandle::MetalMatrixHandle;
+use verifyingmatrixhandle::VerifyingMatrixHandle;
 
 use std::fs;
 use std::fs::File;
@@ -34,11 +36,13 @@ struct BattleStats {
     trace: GameTrace
 }
 
-type InplaceNetworkType = InplaceNeuralNetwork<SimpleMatrixHandle>;
-type SimpleNetworkType = SimpleNeuralNetwork<SimpleMatrixHandle>;
+type MatrixHandleType = VerifyingMatrixHandle;
+
+type InplaceNetworkType = InplaceNeuralNetwork<MatrixHandleType>;
+type SimpleNetworkType = SimpleNeuralNetwork<MatrixHandleType>;
 type NetworkType = SimpleNetworkType;
 
-type AgentType = NeuralNetworkAgent<SimpleMatrixHandle, SimpleNetworkType>;
+type AgentType = NeuralNetworkAgent<MatrixHandleType, SimpleNetworkType>;
 
 fn construct_agent(game_description: GameDescription, layers: &[LayerDescription]) -> AgentType {
     let sample_game = GameDescription::construct_game(game_description);

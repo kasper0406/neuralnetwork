@@ -120,7 +120,7 @@ impl MatrixHandle for MatrixLibHandle {
         }
     }
 
-    pub fn from_matrix(matrix: Matrix<f32>) -> MatrixHandle {
+    pub fn from_matrix(matrix: &Matrix<f32>) -> MatrixHandle {
         let mut handle: MatrixHandle = MatrixHandle::empty();
 
         let alloc_result = unsafe {

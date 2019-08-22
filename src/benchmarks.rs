@@ -73,8 +73,8 @@ fn matrix_operations_gpu(b: &mut Bencher) {
         let A = Matrix::new(1000, 1000, &|row, col| (row + 2 * col) as f32);
         let B = Matrix::new(1000, 1000, &|row, col| (2 * row + col) as f32);
 
-        let handle_a = MatrixHandle::from_matrix(A);
-        let handle_b = MatrixHandle::from_matrix(B);
+        let handle_a = MatrixHandle::from_matrix(&A);
+        let handle_b = MatrixHandle::from_matrix(&B);
 
         bencher::black_box(&(&handle_a + &handle_b).entrywise_product(&handle_a) * &handle_a);
     });

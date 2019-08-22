@@ -47,7 +47,7 @@ where
 
     fn get_regulizer_penalty(&self, weights: &MH) -> MH {
         match self.regulizer {
-            None => MH::from_matrix(Matrix::new(weights.rows(), weights.columns(), &|row, col| 0_f32)),
+            None => MH::from_matrix(&Matrix::new(weights.rows(), weights.columns(), &|row, col| 0_f32)),
             Some(Regulizer::WeightPeanalizer(lambda)) => lambda * weights
         }
     }
@@ -63,8 +63,8 @@ where
             let last_result_with_bias = results.last().unwrap().add_constant_row(1_f32);
             
             let eval = dropout_weights * &last_result_with_bias;
-            results.push(layer_function.evaluate(&eval));
             deltas.push(layer_function.derivative(&eval));
+            results.push(layer_function.evaluate(&eval));
         }
 
         return (results, deltas);
@@ -88,7 +88,7 @@ where
         let layers = layers.iter().map(|layer| {
             let network_layer = Layer {
                 function_descriptor: layer.function_descriptor,
-                weights: MH::from_matrix(Matrix::new(layer.num_neurons, prev_layer_neurons + 1, &|row, col| {
+                weights: MH::from_matrix(&Matrix::new(layer.num_neurons, prev_layer_neurons + 1, &|row, col| {
                     return weight_distribution.sample(&mut rand::thread_rng()) as f32;
                 }))
             };
@@ -136,6 +136,7 @@ where
 
     fn train(&mut self, input: &MH, expected: &MH, alpha: f32, beta: f32, momentums: &Option<Vec<MH>>) -> Vec<MH> {
         let weights_with_dropout = self.compute_weights_with_dropouts();
+
         let (predictions, deltas) = self.predict_for_training(input, &weights_with_dropout);
         let prediction = predictions.last().unwrap();
 
@@ -164,7 +165,7 @@ where
             let mut ms = Vec::with_capacity(self.layers.len());
             for layer in self.layers.iter().rev() {
                 ms.push(MH::from_matrix(
-                    Matrix::new(layer.weights.rows(), layer.weights.columns(), &|row, col| 0_f32)));
+                    &Matrix::new(layer.weights.rows(), layer.weights.columns(), &|row, col| 0_f32)));
             }
             return ms;
         });

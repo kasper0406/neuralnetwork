@@ -5,10 +5,12 @@ use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul, Index, IndexMut};
 use std::collections::HashSet;
 use std::cmp;
+use std::cmp::Eq;
+use std::cmp::PartialEq;
 use rayon::prelude::ParallelSliceMut;
 use rayon::iter::{ ParallelIterator, IndexedParallelIterator };
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Matrix<T> {
     rows: usize,
     columns: usize,
