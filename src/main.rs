@@ -36,16 +36,15 @@ use cocoa::foundation::NSAutoreleasePool;
 
 fn main() {
     // TODO(knielsen): Condition this on Metal feature flag
-    // let pool = unsafe { NSAutoreleasePool::new(cocoa::base::nil) };
+    let pool = unsafe { NSAutoreleasePool::new(cocoa::base::nil) };
 
     // battler::start_battles(10000);
-    // digitclassifier::test_digit_classification();
+    digitclassifier::test_digit_classification();
 
-    metalmatrixhandle::test();
+    // metalmatrixhandle::test();
 
     // TODO(knielsen): Condition this on Metal feature flag
-    /*
     unsafe {
         msg_send![pool, release];
-    }*/
+    }
 }

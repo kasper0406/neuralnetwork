@@ -8,6 +8,15 @@ use serde::{ Deserializer, Deserialize, Serializer, Serialize };
 
 use cocoa::foundation::NSAutoreleasePool;
 
+fn with_autorelease<F, T: Sized>(func: F) -> T
+    where F: Fn() -> T
+{
+    let pool = unsafe { NSAutoreleasePool::new(cocoa::base::nil) };
+    let res = func();
+    unsafe { msg_send![pool, release] };
+    return res;
+}
+
 lazy_static! {
     static ref METAL_INSTANCE: MetalInstance = MetalInstance::new();
 }
@@ -308,19 +317,21 @@ impl<'a> Mul<f32> for &'a MetalMatrixHandle {
     type Output = MetalMatrixHandle;
 
     fn mul(self, scalar: f32) -> MetalMatrixHandle {
-        let data = [scalar; 1];
-        let scalar_buffer = METAL_INSTANCE.device.new_buffer_with_data(
-            unsafe { std::mem::transmute(data.as_ptr()) },
-            std::mem::size_of::<f32>() as u64,
-            MTLResourceOptions::CPUCacheModeDefaultCache
-        );
+        with_autorelease(|| {
+            let data = [scalar; 1];
+            let scalar_buffer = METAL_INSTANCE.device.new_buffer_with_data(
+                unsafe { std::mem::transmute(data.as_ptr()) },
+                std::mem::size_of::<f32>() as u64,
+                MTLResourceOptions::CPUCacheModeDefaultCache
+            );
 
-        return METAL_INSTANCE.execute_kernel_with_result_alloc(
-            &METAL_INSTANCE.scalar_multiply_kernel,
-            &[BufferDescription::MetalBuffer(&scalar_buffer), BufferDescription::MetalBuffer(&self.data)],
-            (1, self.rows() * self.columns()),
-            (self.rows(), self.columns())
-        );
+            return METAL_INSTANCE.execute_kernel_with_result_alloc(
+                &METAL_INSTANCE.scalar_multiply_kernel,
+                &[BufferDescription::MetalBuffer(&scalar_buffer), BufferDescription::MetalBuffer(&self.data)],
+                (1, self.rows() * self.columns()),
+                (self.rows(), self.columns())
+            );
+        })
     }
 }
 impl Mul<&MetalMatrixHandle> for f32 {
@@ -341,7 +352,6 @@ impl Clone for MetalMatrixHandle {
             size,
             MTLResourceOptions::StorageModePrivate
         );
-        unsafe { msg_send![buffer, retain] };
 
         let blit_encoder = command_buffer.new_blit_command_encoder();
         blit_encoder.copy_from_buffer(&self.data, 0, &mut buffer, 0, size);
@@ -422,52 +432,55 @@ impl MetalInstance {
     }
 
     pub fn copy_to_gpu(&self, data: &[f32]) -> Buffer {
-        let command_buffer = self.command_queue.new_command_buffer();
-        let size = (data.len() * std::mem::size_of::<f32>()) as u64;
+        with_autorelease(|| {
+            let command_buffer = self.command_queue.new_command_buffer();
+            let size = (data.len() * std::mem::size_of::<f32>()) as u64;
 
-        let mut buffer = self.device.new_buffer(
-            size,
-            MTLResourceOptions::StorageModePrivate
-        );
-        // unsafe { msg_send![buffer, retain] };
+            let mut buffer = self.device.new_buffer(
+                size,
+                MTLResourceOptions::StorageModePrivate
+            );
 
-        let tmp = self.device.new_buffer_with_data(
-            unsafe { std::mem::transmute(data.as_ptr()) },
-            size,
-            MTLResourceOptions::CPUCacheModeDefaultCache
-        );
+            let tmp = self.device.new_buffer_with_data(
+                unsafe { std::mem::transmute(data.as_ptr()) },
+                size,
+                MTLResourceOptions::CPUCacheModeDefaultCache
+            );
 
-        let blit_encoder = command_buffer.new_blit_command_encoder();
-        blit_encoder.copy_from_buffer(&tmp, 0, &mut buffer, 0, size);
-        blit_encoder.end_encoding();
+            let blit_encoder = command_buffer.new_blit_command_encoder();
+            blit_encoder.copy_from_buffer(&tmp, 0, &mut buffer, 0, size);
+            blit_encoder.end_encoding();
 
-        command_buffer.commit();
+            command_buffer.commit();
 
-        return buffer;
+            return buffer;
+        })
     }
 
     pub fn copy_from_gpu(&self, buffer: &Buffer) -> Vec<f32> {
-        let command_buffer = self.command_queue.new_command_buffer();
+        with_autorelease(|| {
+            let command_buffer = self.command_queue.new_command_buffer();
 
-        let size = buffer.length();
-        assert!(size as usize % std::mem::size_of::<f32>() == 0);
-        let count = size as usize / std::mem::size_of::<f32>();
+            let size = buffer.length();
+            assert!(size as usize % std::mem::size_of::<f32>() == 0);
+            let count = size as usize / std::mem::size_of::<f32>();
 
-        let mut tmp = self.device.new_buffer(size, MTLResourceOptions::StorageModeShared);
+            let mut tmp = self.device.new_buffer(size, MTLResourceOptions::StorageModeShared);
 
-        let blit_encoder = command_buffer.new_blit_command_encoder();
-        blit_encoder.copy_from_buffer(&buffer, 0, &mut tmp, 0, size);
-        blit_encoder.end_encoding();
+            let blit_encoder = command_buffer.new_blit_command_encoder();
+            blit_encoder.copy_from_buffer(&buffer, 0, &mut tmp, 0, size);
+            blit_encoder.end_encoding();
 
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-        let raw_ptr: *const f32 = unsafe { std::mem::transmute(tmp.contents()) };
-        let mut dst = Vec::with_capacity(count);
-        for i in 0..count {
-            dst.push(unsafe { raw_ptr.offset(i as isize).read() });
-        }
-        return dst;
+            let raw_ptr: *const f32 = unsafe { std::mem::transmute(tmp.contents()) };
+            let mut dst = Vec::with_capacity(count);
+            for i in 0..count {
+                dst.push(unsafe { raw_ptr.offset(i as isize).read() });
+            }
+            return dst;
+        })
     }
 
     fn execute_kernel(&self,
@@ -545,16 +558,6 @@ impl MetalInstance {
 
 unsafe impl Send for MetalMatrixHandle { }
 
-impl Drop for MetalMatrixHandle {
-    fn drop(&mut self) {
-        // println!("Dropping {}x{} matrix", self.rows(), self.columns());
-        unsafe {
-            // msg_send![ self.data, release ];
-        }
-        // println!("Finished dropping");
-    }
-}
-
 impl Serialize for MetalMatrixHandle {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where S: Serializer
@@ -573,8 +576,6 @@ impl<'de> Deserialize<'de> for MetalMatrixHandle {
 
 pub fn test() {
 
-    // let pool = unsafe { NSAutoreleasePool::new(cocoa::base::nil) };
-
     /*
     let A = Matrix::new(10, 3, &|row, col| (row * 3 + col) as f32);
     println!("{}", A);
@@ -585,17 +586,13 @@ pub fn test() {
     let R = MetalMatrixHandle::to_matrix(&handleB); */
 
     let A = Matrix::new(100, 100, &|row, col| if row == col { 1 } else { 0 } as f32);
-    // let B = Matrix::new(50, 50, &|row, col| if row == col { 1 } else { 0 } as f32);
+    let B = Matrix::new(50, 50, &|row, col| if row == col { 1 } else { 0 } as f32);
 
     println!("Creating handles");
 
     let mut handleA = MetalMatrixHandle::from_matrix(&A);
-    for _ in 0..10000 {
-        handleA = MetalMatrixHandle::from_matrix(&A);
-    }
-    // let handleB = MetalMatrixHandle::from_matrix(&B);
+    let handleB = MetalMatrixHandle::from_matrix(&B);
 
-    /*
     println!("Doing operations");
     let handleC = &handleA + &handleB;
     let handleD = &handleC * &handleC;
@@ -616,19 +613,14 @@ pub fn test() {
     println!("Inplace operations");
     handleJ += handleI;
     handleJ -= handleA;
-    */
 
-    /*
     println!("Clone");
     let handleK = handleJ.clone();
     let handleL = handleK * 0.1f32;
 
     let handleM = handleL.apply_function(ElementFunction::Sigmoid);
 
-    // let C = &A * &B;
-    */
-
-    let R = MetalMatrixHandle::to_matrix(&handleA);
+    let R = MetalMatrixHandle::to_matrix(&handleM);
     println!("Result of multiplication:");
     println!("{}", R);
 
@@ -640,7 +632,5 @@ pub fn test() {
     println!("{}", C); */
 
     // let B = Matrix::new(5, 5, &|row, col| row as f32 / col as f32);
-
-    // unsafe { pool.autorelease() };
 
 }

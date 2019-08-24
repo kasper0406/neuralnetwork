@@ -14,8 +14,8 @@ use std::iter::FromIterator;
 
 const image_size: usize = 16 * 16;
 
-// type MatrixHandleType = SimpleMatrixHandle;
-type MatrixHandleType = MetalMatrixHandle;
+type MatrixHandleType = SimpleMatrixHandle;
+// type MatrixHandleType = MetalMatrixHandle;
 // type MatrixHandleType = VerifyingMatrixHandle;
 type Network = SimpleNeuralNetwork<MatrixHandleType>;
 
@@ -152,7 +152,7 @@ pub fn test_digit_classification() {
             round, in_sample_error, compute_avg_error(&mut network, test_samples));
 
         let mut momentums = None;
-        for _ in 0..50 {
+        for _ in 0..20 {
             // Train multiple samples at the same time
             let mut selected_samples = Vec::with_capacity(samples_per_batch);
             training_samples.choose_multiple(&mut rng, samples_per_batch).for_each(|sample| selected_samples.push(sample));
