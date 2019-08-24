@@ -1,5 +1,4 @@
-use serde::{ Deserializer, Deserialize, Serializer, Serialize };
-use matrix::Matrix;
+use matrix::matrix::Matrix;
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul};
 
 pub trait MatrixHandle: Add + AddAssign + Sub + SubAssign + Mul + Mul<f32> + Clone

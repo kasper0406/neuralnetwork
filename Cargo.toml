@@ -5,6 +5,11 @@ authors = ["Kasper Nielsen <kasper0406@gmail.com>"]
 
 build = "build.rs"
 
+[features]
+default = []
+cudamatrix = []
+metalmatrix = []
+
 [dependencies]
 num = "*"
 rand = "0.7.0"

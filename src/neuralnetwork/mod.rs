@@ -3,7 +3,7 @@ pub mod simple;
 
 use activationfunction::{ Sigmoid, Relu, TwoPlayerScore };
 use activationfunction::ActivationFunction;
-use matrixhandle::MatrixHandle;
+use matrix::matrixhandle::MatrixHandle;
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum ActivationFunctionDescriptor {

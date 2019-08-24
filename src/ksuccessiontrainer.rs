@@ -1,9 +1,9 @@
 extern crate rand;
 
-use matrixhandle::MatrixHandle;
+use matrix::matrixhandle::MatrixHandle;
 use ksuccession::{ KSuccession, Color };
 use neuralnetwork::NeuralNetwork;
-use matrix::Matrix;
+use matrix::matrix::Matrix;
 use rand::{thread_rng, Rng};
 use rand::seq::SliceRandom;
 use rand::distributions::Uniform;

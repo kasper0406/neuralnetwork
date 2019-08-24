@@ -3,21 +3,18 @@ use rand::seq::SliceRandom;
 use neuralnetwork::{ ActivationFunctionDescriptor, NeuralNetwork, LayerDescription };
 use neuralnetwork::simple::SimpleNeuralNetwork;
 use neuralnetwork::{ DropoutType, Regulizer };
-use simplematrixhandle::SimpleMatrixHandle;
-use metalmatrixhandle::MetalMatrixHandle;
-use verifyingmatrixhandle::VerifyingMatrixHandle;
-use matrixhandle::MatrixHandle;
-use matrix::Matrix;
+use matrix::matrix::Matrix;
 use std::fs::File;
 use std::io::Read;
-use std::iter::FromIterator;
+use matrix::matrixhandle::MatrixHandle;
+use matrix::MatrixHandleType;
+use matrix::verifyingmatrixhandle::VerifyingMatrixHandle;
 
 const image_size: usize = 16 * 16;
 
-type MatrixHandleType = SimpleMatrixHandle;
-// type MatrixHandleType = MetalMatrixHandle;
-// type MatrixHandleType = VerifyingMatrixHandle;
-type Network = SimpleNeuralNetwork<MatrixHandleType>;
+// type LocalMatrixHandleType = VerifyingMatrixHandle;
+type LocalMatrixHandleType = MatrixHandleType;
+type Network = SimpleNeuralNetwork<LocalMatrixHandleType>;
 
 #[derive(Clone)]
 struct ImageSample {
@@ -113,11 +110,11 @@ fn construct_network() -> Network {
     return nn;
 }
 
-fn samples_to_handle(samples: &[&ImageSample]) -> (MatrixHandleType, MatrixHandleType) {
-    let values = MatrixHandleType::from_matrix(&Matrix::new(image_size, samples.len(),
+fn samples_to_handle(samples: &[&ImageSample]) -> (LocalMatrixHandleType, LocalMatrixHandleType) {
+    let values = LocalMatrixHandleType::from_matrix(&Matrix::new(image_size, samples.len(),
         &|row, col| samples[col].values[(0, row)]));
 
-    let labels = MatrixHandleType::from_matrix(&Matrix::new(10, samples.len(),
+    let labels = LocalMatrixHandleType::from_matrix(&Matrix::new(10, samples.len(),
         &|row, col| samples[col].label[(0, row)]));
 
     return (values, labels);
@@ -173,7 +170,8 @@ pub fn test_digit_classification() {
 
     // TODO:This can be combined into one prediction instead
     for sample in test_samples {
-        let prediction_vector = MatrixHandleType::to_matrix(&network.predict(&MatrixHandleType::from_matrix(&sample.values.clone())));
+        let prediction_vector = LocalMatrixHandleType::to_matrix(&network.predict(
+            &LocalMatrixHandleType::from_matrix(&sample.values.clone())));
 
         let mut prediction = 0;
         let mut actual = 0;

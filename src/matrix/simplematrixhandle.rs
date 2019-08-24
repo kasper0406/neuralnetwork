@@ -1,7 +1,11 @@
-use matrixhandle::MatrixHandle;
-use matrix::Matrix;
+use matrix::matrixhandle::MatrixHandle;
+use matrix::matrix::Matrix;
 use std::ops::{ Add, AddAssign, Sub, SubAssign, Mul, MulAssign };
 use serde::{ Deserializer, Deserialize, Serializer, Serialize };
+use activationfunction::ActivationFunction;
+use activationfunction::Sigmoid;
+use activationfunction::Relu;
+use activationfunction::TwoPlayerScore;
 
 pub struct SimpleMatrixHandle {
     matrix: Matrix<f32>
@@ -196,5 +200,59 @@ impl<'de> Deserialize<'de> for SimpleMatrixHandle {
     {
         let deserialize_result = Matrix::deserialize(deserializer);
         deserialize_result.map(|matrix| SimpleMatrixHandle::from_matrix(&matrix))
+    }
+}
+
+impl ActivationFunction<SimpleMatrixHandle> for Sigmoid {
+    fn evaluate(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(&self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn derivative(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(&self.derivative(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn inline_evaluate(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+impl ActivationFunction<SimpleMatrixHandle> for Relu {
+    fn evaluate(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(&self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn derivative(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(&self.derivative(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn inline_evaluate(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+impl ActivationFunction<SimpleMatrixHandle> for TwoPlayerScore {
+    fn evaluate(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(&self.evaluate(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn derivative(&self, input: &SimpleMatrixHandle) -> SimpleMatrixHandle {
+        return SimpleMatrixHandle::from_matrix(&self.derivative(&SimpleMatrixHandle::to_matrix(input)));
+    }
+
+    fn inline_evaluate(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut SimpleMatrixHandle) {
+        panic!("Not implemented!");
     }
 }

@@ -1,4 +1,4 @@
-use matrix::Matrix;
+use matrix::matrix::Matrix;
 use ksuccession::Color;
 use std::fmt;
 use std::ops::Sub;

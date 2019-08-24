@@ -1,10 +1,14 @@
 use metal::*;
 use objc_foundation::{INSString, INSArray};
 
-use matrixhandle::MatrixHandle;
-use matrix::Matrix;
+use matrix::matrixhandle::MatrixHandle;
+use matrix::matrix::Matrix;
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul};
 use serde::{ Deserializer, Deserialize, Serializer, Serialize };
+use activationfunction::ActivationFunction;
+use activationfunction::Sigmoid;
+use activationfunction::Relu;
+use activationfunction::TwoPlayerScore;
 
 use cocoa::foundation::NSAutoreleasePool;
 
@@ -401,7 +405,7 @@ impl MetalInstance {
 
         let command_queue = device.new_command_queue();
 
-        let metal_matrix_lib = device.new_library_with_file("src/metalmatrix.metallib").unwrap();
+        let metal_matrix_lib = device.new_library_with_file("src/matrix/metalmatrix.metallib").unwrap();
 
         println!("Found the following functions in the Metal library:");
         let function_names = metal_matrix_lib.function_names().to_vec();
@@ -571,6 +575,60 @@ impl<'de> Deserialize<'de> for MetalMatrixHandle {
         where D: Deserializer<'de>
     {
         panic!("Deserialize not implemented!");
+    }
+}
+
+impl ActivationFunction<MetalMatrixHandle> for Sigmoid {
+    fn evaluate(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        return input.apply_function(ElementFunction::Sigmoid);
+    }
+
+    fn derivative(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        return input.apply_function(ElementFunction::SigmoidDerivative);
+    }
+
+    fn inline_evaluate(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+impl ActivationFunction<MetalMatrixHandle> for Relu {
+    fn evaluate(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn derivative(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn inline_evaluate(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+}
+
+impl ActivationFunction<MetalMatrixHandle> for TwoPlayerScore {
+    fn evaluate(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn derivative(&self, input: &MetalMatrixHandle) -> MetalMatrixHandle {
+        panic!("Not implemented!");
+    }
+
+    fn inline_evaluate(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
+    }
+
+    fn inline_derivative(&self, input: &mut MetalMatrixHandle) {
+        panic!("Not implemented!");
     }
 }
 

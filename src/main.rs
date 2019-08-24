@@ -20,12 +20,9 @@ extern crate metal;
 
 mod matrix;
 mod battler;
-mod matrixhandle;
 mod activationfunction;
 mod neuralnetwork;
-mod simplematrixhandle;
-mod metalmatrixhandle;
-mod verifyingmatrixhandle;
+
 mod ksuccession;
 mod ksuccessiontrainer;
 mod agentstats;

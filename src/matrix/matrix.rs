@@ -5,10 +5,12 @@ use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul, Index, IndexMut};
 use std::collections::HashSet;
 use std::cmp;
-use std::cmp::Eq;
-use std::cmp::PartialEq;
 use rayon::prelude::ParallelSliceMut;
 use rayon::iter::{ ParallelIterator, IndexedParallelIterator };
+use activationfunction::ActivationFunction;
+use activationfunction::Sigmoid;
+use activationfunction::Relu;
+use activationfunction::TwoPlayerScore;
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Matrix<T> {
@@ -283,5 +285,190 @@ impl<T: fmt::Display> fmt::Display for Matrix<T> {
             result = result.and(write!(f, "\n"));
         }
         return result;
+    }
+}
+
+
+/**
+ * Consider moving the code below to a different file
+ */
+
+impl ActivationFunction<f32> for Sigmoid {
+    fn evaluate(&self, x: &f32) -> f32 {
+        let exp = x.exp();
+        if exp.is_infinite() {
+            return 1f32;
+        }
+
+        let res = exp / (exp + 1_f32);
+        if cfg!(debug_assertions) && res.is_nan() {
+            panic!("Evaluated to NaN!");
+        }
+        return res;
+    }
+
+    fn derivative(&self, x: &f32) -> f32 {
+        let exp = x.exp();
+        if exp.is_infinite() {
+            return 0f32;
+        }
+
+        let res = exp / (exp + 1_f32).powi(2);
+        if cfg!(debug_assertions) && res.is_nan() {
+            panic!("Evaluated to NaN!");
+        }
+        return res;
+    }
+
+    fn inline_evaluate(&self, x: &mut f32) {
+        *x = self.evaluate(&x);
+    }
+
+    fn inline_derivative(&self, x: &mut f32) {
+        *x = self.derivative(&x);
+    }
+}
+
+impl ActivationFunction<Matrix<f32>> for Sigmoid {
+    fn evaluate(&self, input: &Matrix<f32>) -> Matrix<f32> {
+        return Matrix::new(input.rows(), input.columns(), &|row, column| {
+            return self.evaluate(&input[(row, column)]);
+        });
+    }
+
+    fn derivative(&self, input: &Matrix<f32>) -> Matrix<f32> {
+        return Matrix::new(input.rows(), input.columns(), &|row, column| {
+            return self.derivative(&input[(row, column)]);
+        });
+    }
+    
+    fn inline_evaluate(&self, input: &mut Matrix<f32>) {
+        for row in 0 .. input.rows() {
+            for column in 0 .. input.columns() {
+                input[(row, column)] = self.evaluate(&input[(row, column)]);
+            }
+        }
+    }
+
+    fn inline_derivative(&self, input: &mut Matrix<f32>) {
+        for row in 0 .. input.rows() {
+            for column in 0 .. input.columns() {
+                input[(row, column)] = self.derivative(&input[(row, column)]);
+            }
+        }
+    }
+}
+
+impl ActivationFunction<f32> for Relu {
+    fn evaluate(&self, x: &f32) -> f32 {
+        return if *x < 0_f32 { 0_f32 } else { *x };
+    }
+
+    fn derivative(&self, x: &f32) -> f32 {
+        return if *x < 0_f32 { 0_f32 } else { 1_f32 };
+    }
+    
+    fn inline_evaluate(&self, x: &mut f32) {
+        *x = self.evaluate(&x);
+    }
+
+    fn inline_derivative(&self, x: &mut f32) {
+        *x = self.derivative(&x);
+    }
+}
+
+impl ActivationFunction<Matrix<f32>> for Relu {
+    fn evaluate(&self, input: &Matrix<f32>) -> Matrix<f32> {
+        return Matrix::new(input.rows(), input.columns(), &|row, column| {
+            return self.evaluate(&input[(row, column)]);
+        });
+    }
+
+    fn derivative(&self, input: &Matrix<f32>) -> Matrix<f32> {
+        return Matrix::new(input.rows(), input.columns(), &|row, column| {
+            return self.derivative(&input[(row, column)]);
+        });
+    }
+
+    fn inline_evaluate(&self, input: &mut Matrix<f32>) {
+        for row in 0 .. input.rows() {
+            for column in 0 .. input.columns() {
+                input[(row, column)] = self.evaluate(&input[(row, column)]);
+            }
+        }
+    }
+
+    fn inline_derivative(&self, input: &mut Matrix<f32>) {
+        for row in 0 .. input.rows() {
+            for column in 0 .. input.columns() {
+                input[(row, column)] = self.derivative(&input[(row, column)]);
+            }
+        }
+    }
+}
+
+impl ActivationFunction<f32> for TwoPlayerScore {
+    fn evaluate(&self, x: &f32) -> f32 {
+        let exp = x.exp();
+        if exp.is_infinite() {
+            return 1f32;
+        }
+
+        let res = (exp - 1_f32) / (exp + 1_f32);
+        if cfg!(debug_assertions) && res.is_nan() {
+            panic!("Evaluated to NaN!");
+        }
+        return res;
+    }
+
+    fn derivative(&self, x: &f32) -> f32 {
+        let exp = x.exp();
+        if exp.is_infinite() {
+            return 0f32;
+        }
+
+        let res = 2_f32 * exp / (exp + 1_f32).powi(2);
+        if cfg!(debug_assertions) && res.is_nan() {
+            panic!("Evaluated to NaN!");
+        }
+        return res;
+    }
+
+    fn inline_evaluate(&self, x: &mut f32) {
+        *x = self.evaluate(&x);
+    }
+
+    fn inline_derivative(&self, x: &mut f32) {
+        *x = self.derivative(&x);
+    }
+}
+
+impl ActivationFunction<Matrix<f32>> for TwoPlayerScore {
+    fn evaluate(&self, input: &Matrix<f32>) -> Matrix<f32> {
+        return Matrix::new(input.rows(), input.columns(), &|row, column| {
+            return self.evaluate(&input[(row, column)]);
+        });
+    }
+
+    fn derivative(&self, input: &Matrix<f32>) -> Matrix<f32> {
+        return Matrix::new(input.rows(), input.columns(), &|row, column| {
+            return self.derivative(&input[(row, column)]);
+        });
+    }
+
+    fn inline_evaluate(&self, input: &mut Matrix<f32>) {
+        for row in 0 .. input.rows() {
+            for column in 0 .. input.columns() {
+                input[(row, column)] = self.evaluate(&input[(row, column)]);
+            }
+        }
+    }
+
+    fn inline_derivative(&self, input: &mut Matrix<f32>) {
+        for row in 0 .. input.rows() {
+            for column in 0 .. input.columns() {
+                input[(row, column)] = self.derivative(&input[(row, column)]);
+            }
+        }
     }
 }

@@ -1,4 +1,4 @@
-use matrix::Matrix;
+use matrix::matrix::Matrix;
 use rand::thread_rng;
 use rand::seq::SliceRandom;
 use std::cell::UnsafeCell;
@@ -7,13 +7,10 @@ use neuralnetwork::NeuralNetwork;
 use neuralnetwork::LayerDescription;
 use neuralnetwork::DropoutType;
 use neuralnetwork::ActivationFunctionDescriptor;
-use neuralnetwork::Regulizer;
 use neuralnetwork::inplace::InplaceNeuralNetwork;
 use neuralnetwork::simple::SimpleNeuralNetwork;
 
-use simplematrixhandle::SimpleMatrixHandle;
-use metalmatrixhandle::MetalMatrixHandle;
-use verifyingmatrixhandle::VerifyingMatrixHandle;
+use matrix::MatrixHandleType;
 
 use std::fs;
 use std::fs::File;
@@ -35,8 +32,6 @@ struct BattleStats {
     agent2_index: usize,
     trace: GameTrace
 }
-
-type MatrixHandleType = VerifyingMatrixHandle;
 
 type InplaceNetworkType = InplaceNeuralNetwork<MatrixHandleType>;
 type SimpleNetworkType = SimpleNeuralNetwork<MatrixHandleType>;

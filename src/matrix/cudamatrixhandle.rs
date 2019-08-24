@@ -1,11 +1,14 @@
 use serde::{ Deserializer, Deserialize, Serializer, Serialize };
-use matrix::Matrix;
+use matrix::matrix::Matrix;
 use std::ops::{Add, AddAssign, Sub, SubAssign, Mul};
 use std::ptr;
+use activationfunction::ActivationFunction;
+use activationfunction::Sigmoid;
+use activationfunction::Relu;
+use activationfunction::TwoPlayerScore;
 
-#[cfg(matrixlib)]
 #[repr(C)]
-pub struct MatrixLibHandle {
+pub struct CudaMatrixHandle {
     rows: usize,
     columns: usize,
     elements: *const f32,
@@ -13,10 +16,8 @@ pub struct MatrixLibHandle {
     base_ptr: *const f32
 }
 
-#[cfg(matrixlib)]
-unsafe impl Send for MatrixLibHandle { }
+unsafe impl Send for CudaMatrixHandle { }
 
-#[cfg(matrixlib)]
 #[link(name = "matrix", kind = "static")]
 extern {
 
@@ -89,8 +90,7 @@ extern {
                    handle_result: *mut MatrixHandle) -> libc::c_int;
 }
 
-#[cfg(matrixlib)]
-impl MatrixLibHandle {
+impl CudaMatrixHandle {
     pub fn empty() -> MatrixHandle {
         MatrixHandle {
             rows: 0,
@@ -111,8 +111,7 @@ impl MatrixLibHandle {
     }
 }
 
-#[cfg(matrixlib)]
-impl MatrixHandle for MatrixLibHandle {
+impl MatrixHandle for CudaMatrixHandle {
     pub fn copy(destination: &mut MatrixHandle, source: &MatrixHandle) {
         let copy_result = unsafe { matrix_copy(source, destination) };
         if copy_result != 0 {
@@ -310,7 +309,6 @@ impl MatrixHandle for MatrixLibHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl Drop for LibMatrixHandle {
     fn drop(&mut self) {
         if self.elements != ptr::null() {
@@ -319,7 +317,6 @@ impl Drop for LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl<'a> Add for &'a LibMatrixHandle {
     type Output = MatrixHandle;
 
@@ -337,7 +334,6 @@ impl<'a> Add for &'a LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl AddAssign for LibMatrixHandle {
     fn add_assign(&mut self, rhs: LibMatrixHandle) {
         let add_assign_result = unsafe {
@@ -350,7 +346,6 @@ impl AddAssign for LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl<'a> AddAssign<&'a LibMatrixHandle> for LibMatrixHandle {
     fn add_assign(&mut self, rhs: &LibMatrixHandle) {
         let add_assign_result = unsafe {
@@ -363,7 +358,6 @@ impl<'a> AddAssign<&'a LibMatrixHandle> for LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl<'a> Sub for &'a LibMatrixHandle {
     type Output = LibMatrixHandle;
 
@@ -381,7 +375,6 @@ impl<'a> Sub for &'a LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl<'a> SubAssign<&'a LibMatrixHandle> for LibMatrixHandle {
     fn sub_assign(&mut self, rhs: &LibMatrixHandle) {
         let add_assign_result = unsafe {
@@ -394,7 +387,6 @@ impl<'a> SubAssign<&'a LibMatrixHandle> for LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl<'a> Mul for &'a LibMatrixHandle {
     type Output = LibMatrixHandle;
 
@@ -412,7 +404,6 @@ impl<'a> Mul for &'a LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl<'a> Mul<f32> for &'a LibMatrixHandle {
     type Output = LibMatrixHandle;
 
@@ -430,7 +421,6 @@ impl<'a> Mul<f32> for &'a LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl<'a> Mul<&'a LibMatrixHandle> for f32 {
     type Output = LibMatrixHandle;
 
@@ -439,7 +429,6 @@ impl<'a> Mul<&'a LibMatrixHandle> for f32 {
     }
 }
 
-#[cfg(matrixlib)]
 impl Clone for LibMatrixHandle {
     fn clone(&self) -> LibMatrixHandle {
         let mut result_handle = LibMatrixHandle::empty();
@@ -454,7 +443,6 @@ impl Clone for LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl Serialize for LibMatrixHandle {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where S: Serializer
@@ -464,12 +452,170 @@ impl Serialize for LibMatrixHandle {
     }
 }
 
-#[cfg(matrixlib)]
 impl<'de> Deserialize<'de> for LibMatrixHandle {
     fn deserialize<D>(deserializer: D) -> Result<LibMatrixHandle, D::Error>
         where D: Deserializer<'de>
     {
         let deserialize_result = Matrix::deserialize(deserializer);
         deserialize_result.map(|matrix| MatrixHandle::from_matrix(matrix))
+    }
+}
+
+#[link(name = "matrix", kind = "static")]
+extern {
+    fn matrix_apply_sigmoid(handle_a: *const LibMatrixHandle,
+                            handle_result: *mut LibMatrixHandle) -> libc::c_int;
+    fn matrix_apply_sigmoid_derivative(handle_a: *const LibMatrixHandle,
+                                       handle_result: *mut LibMatrixHandle) -> libc::c_int;
+    
+    fn matrix_apply_relu(handle_a: *const LibMatrixHandle,
+                         handle_result: *mut LibMatrixHandle) -> libc::c_int;
+    fn matrix_apply_relu_derivative(handle_a: *const LibMatrixHandle,
+                                    handle_result: *mut LibMatrixHandle) -> libc::c_int;
+    
+    fn matrix_apply_twoplayerscore(handle_a: *const LibMatrixHandle,
+                                   handle_result: *mut LibMatrixHandle) -> libc::c_int;
+    fn matrix_apply_twoplayerscore_derivative(handle_a: *const LibMatrixHandle,
+                                              handle_result: *mut LibMatrixHandle) -> libc::c_int;
+}
+
+impl ActivationFunction<MatrixHandle> for Sigmoid {
+    fn evaluate(&self, input: &MatrixHandle) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_apply_sigmoid(input as *const MatrixHandle,
+                                 &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to calculate sigmoid!");
+        }
+        return result_handle;
+    }
+
+
+    fn derivative(&self, input: &MatrixHandle) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_apply_sigmoid_derivative(input as *const MatrixHandle,
+                                            &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to calculate sigmoid derivative!");
+        }
+        return result_handle;
+    }
+
+    fn inline_evaluate(&self, input: &mut MatrixHandle) {
+        let result = unsafe {
+            matrix_apply_sigmoid(input as *const MatrixHandle,
+                                 input as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to calculate inline sigmoid")
+        }
+    }
+
+    fn inline_derivative(&self, input: &mut MatrixHandle) {
+        let result = unsafe {
+            matrix_apply_sigmoid_derivative(input as *const MatrixHandle,
+                                            input as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to calculate inline sigmoid")
+        }
+    }
+}
+
+impl ActivationFunction<MatrixHandle> for Relu {
+    fn evaluate(&self, input: &MatrixHandle) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_apply_relu(input as *const MatrixHandle,
+                              &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to transpose matrices!");
+        }
+        return result_handle;
+    }
+
+
+    fn derivative(&self, input: &MatrixHandle) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_apply_relu_derivative(input as *const MatrixHandle,
+                                         &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to transpose matrices!");
+        }
+        return result_handle;
+    }
+    
+    fn inline_evaluate(&self, input: &mut MatrixHandle) {
+        let result = unsafe {
+            matrix_apply_relu(input as *const MatrixHandle,
+                              input as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to calculate inline sigmoid")
+        }
+    }
+
+    fn inline_derivative(&self, input: &mut MatrixHandle) {
+        let result = unsafe {
+            matrix_apply_relu_derivative(input as *const MatrixHandle,
+                                         input as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to calculate inline sigmoid")
+        }
+    }
+}
+
+impl ActivationFunction<MatrixHandle> for TwoPlayerScore {
+    fn evaluate(&self, input: &MatrixHandle) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_apply_twoplayerscore(input as *const MatrixHandle,
+                                        &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to transpose matrices!");
+        }
+        return result_handle;
+    }
+
+
+    fn derivative(&self, input: &MatrixHandle) -> MatrixHandle {
+        let mut result_handle = MatrixHandle::empty();
+        let result = unsafe {
+            matrix_apply_twoplayerscore_derivative(input as *const MatrixHandle,
+                                                   &mut result_handle as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to transpose matrices!");
+        }
+        return result_handle;
+    }
+    
+    fn inline_evaluate(&self, input: &mut MatrixHandle) {
+        let result = unsafe {
+            matrix_apply_twoplayerscore(input as *const MatrixHandle,
+                                        input as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to calculate inline sigmoid")
+        }
+    }
+
+    fn inline_derivative(&self, input: &mut MatrixHandle) {
+        let result = unsafe {
+            matrix_apply_twoplayerscore_derivative(input as *const MatrixHandle,
+                                                   input as *mut MatrixHandle)
+        };
+        if result != 0 {
+            panic!("Failed to calculate inline sigmoid")
+        }
     }
 }
